@@ -22,16 +22,49 @@ echo    Flashscore Ratings — Installer
 echo  ============================================================
 echo.
 
-:: ── Check Python ─────────────────────────────────────────────
+:: ── Check / Install Python ───────────────────────────────────
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo  [ERROR] Python is not installed or not in PATH.
+    echo  [INFO] Python not found. Attempting automatic install...
     echo.
-    echo  Download Python from: https://www.python.org/downloads/
-    echo  Make sure to check "Add Python to PATH" during install.
-    echo.
-    pause
-    exit /b 1
+
+    :: Try winget first (available on Windows 10/11)
+    winget --version >nul 2>&1
+    if not errorlevel 1 (
+        echo  Installing Python via winget...
+        winget install --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
+        :: Refresh PATH so python is visible immediately
+        call refreshenv >nul 2>&1
+        set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts"
+    )
+
+    :: Check again after winget attempt
+    python --version >nul 2>&1
+    if errorlevel 1 (
+        echo.
+        echo  [INFO] Winget install did not work. Downloading Python installer...
+        set PY_INSTALLER=%TEMP%\python_installer.exe
+        powershell -NoProfile -Command ^
+          "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe' -OutFile '%TEMP%\python_installer.exe' -UseBasicParsing"
+        echo.
+        echo  Running Python installer — check "Add Python to PATH" and click Install Now.
+        "%TEMP%\python_installer.exe" /passive PrependPath=1 Include_pip=1
+        del "%TEMP%\python_installer.exe" >nul 2>&1
+        :: Refresh PATH
+        set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts"
+    )
+
+    :: Final check
+    python --version >nul 2>&1
+    if errorlevel 1 (
+        echo.
+        echo  [ERROR] Python still not found after install attempt.
+        echo          Please install Python manually from https://www.python.org/downloads/
+        echo          Make sure to check "Add Python to PATH" during install, then re-run this installer.
+        echo.
+        pause
+        exit /b 1
+    )
 )
 echo  [OK] Python found.
 

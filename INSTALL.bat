@@ -9,16 +9,12 @@ setlocal enabledelayedexpansion
 
 set GITHUB_ZIP=https://github.com/dsquash/flashscore-ratings/archive/refs/heads/main.zip
 
-:: ── Paste your Google Drive file ID below ──────────────────
-:: To get it: Share the .zip on Drive → copy the link
-:: Link looks like: https://drive.google.com/file/d/XXXXXXXX/view
-:: Paste only the ID (the XXXXXXXX part) below
-set GDRIVE_ID=REPLACE_WITH_YOUR_GOOGLE_DRIVE_FILE_ID
+:: ── Google Drive folder with the AE template ────────────────
+set GDRIVE_FOLDER_ID=1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti
 :: ────────────────────────────────────────────────────────────
 
 set INSTALL_DIR=%~dp0
 set TEMP_ZIP=%TEMP%\flashscore_code.zip
-set TEMP_TEMPLATE=%TEMP%\flashscore_template.zip
 
 echo.
 echo  ============================================================
@@ -61,30 +57,19 @@ rmdir /s /q "%TEMP%\flashscore_extract" >nul 2>&1
 del "%TEMP_ZIP%" >nul 2>&1
 echo  [OK] App files installed.
 
-:: ── Download AE template from Google Drive ────────────────────
-if "%GDRIVE_ID%"=="REPLACE_WITH_YOUR_GOOGLE_DRIVE_FILE_ID" (
-    echo.
-    echo  [SKIP] AE template not configured in this installer.
-    echo         Contact Marian Grosu to get the After Effects template.
-    goto :after_template
-)
-
+:: ── Download AE template from Google Drive (folder) ──────────
 echo.
-echo  [3/4] Downloading After Effects template...
-powershell -NoProfile -Command ^
-  "try { Invoke-WebRequest -Uri 'https://drive.google.com/uc?export=download^&id=%GDRIVE_ID%' -OutFile '%TEMP_TEMPLATE%' -UseBasicParsing; Write-Host 'OK' } catch { Write-Host ('FAIL: ' + $_.Exception.Message); exit 1 }"
+echo  [3/4] Downloading After Effects template from Google Drive...
+python -m pip install gdown --quiet
+python -m gdown --folder "%GDRIVE_FOLDER_ID%" -O "%INSTALL_DIR%" --quiet 2>nul
 
 if errorlevel 1 (
-    echo  [WARNING] Could not download AE template.
-    echo           You can download it manually from Google Drive later.
-    goto :after_template
+    echo  [WARNING] Could not download AE template automatically.
+    echo            Download it manually from:
+    echo            https://drive.google.com/drive/folders/%GDRIVE_FOLDER_ID%
+) else (
+    echo  [OK] After Effects template downloaded.
 )
-
-echo  [4/4] Extracting After Effects template...
-powershell -NoProfile -Command ^
-  "Expand-Archive -Path '%TEMP_TEMPLATE%' -DestinationPath '%INSTALL_DIR%' -Force"
-del "%TEMP_TEMPLATE%" >nul 2>&1
-echo  [OK] After Effects template installed.
 
 :after_template
 

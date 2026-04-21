@@ -34,6 +34,7 @@ UPDATABLE_FILES = [
     "updater.py",
     "populate_lineup.jsx",
     "reset_lineup.jsx",
+    "refresh_comps.jsx",
     "save_template_state.jsx",
     "Lineup Panel.jsx",
     "START HERE.bat",

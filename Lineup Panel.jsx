@@ -251,23 +251,23 @@
 
     // ── onClick: Refresh Stats ─────────────────────────────────
     btnRefreshStats.onClick = function() {
-        // Construieste calea spre refresh_stats.py si spre summary
-        var scriptPath  = dir + "/refresh_stats.py";
-        var summaryPath = dir + "/flashscore_output/last_refresh_summary.txt";
+        var scriptPath    = dir + "/refresh_stats.py";
+        var refreshJsx    = dir + "/refresh_comps.jsx";
+        var summaryPath   = dir + "/flashscore_output/last_refresh_summary.txt";
 
         if (!(new File(scriptPath)).exists) {
             alert("refresh_stats.py was not found in:\n" + dir);
             return;
         }
 
-        statusTxt.text = "Refreshing stats...";
+        // ── Step 1: run Python scraper to update data.json ────────
+        statusTxt.text = "Refreshing stats from Flashscore...";
         try { panel.layout.layout(true); } catch(e) {}
 
-        // Runs Python synchronously (AE freezes for a few seconds)
         var winPath = scriptPath.replace(/\//g, "\\");
         system.callSystem('cmd /c python "' + winPath + '" >nul 2>&1');
 
-        // Citeste summary
+        // ── Step 2: read and show summary ─────────────────────────
         var sf = new File(summaryPath);
         var summaryText = "";
         if (sf.exists) {
@@ -277,14 +277,29 @@
             sf.close();
         }
 
-        statusTxt.text = "Refresh stats \u2014 done.";
-        try { panel.layout.layout(true); } catch(e) {}
-
         if (summaryText) {
             alert("REFRESH STATS\n\n" + summaryText);
-        } else {
-            alert("Refresh finalizat.\n(Nu am putut citi summary-ul.)");
         }
+
+        // ── Step 3: update AE compositions ────────────────────────
+        var fJsx = new File(refreshJsx);
+        if (fJsx.exists) {
+            statusTxt.text = "Updating compositions...";
+            try { panel.layout.layout(true); } catch(e) {}
+            try {
+                $.global.__LINEUP_SCRIPTS_DIR__ = dir;
+                $.evalFile(fJsx);
+                statusTxt.text = "Refresh Stats \u2014 done.";
+            } catch(e) {
+                statusTxt.text = "ERROR updating comps \u2014 see alert.";
+                alert("Error in refresh_comps.jsx:\n" + (e.message || String(e)));
+            }
+        } else {
+            statusTxt.text = "Refresh Stats \u2014 done (comps not updated).";
+            alert("refresh_comps.jsx not found.\nStats were updated in data.json but compositions were not refreshed.");
+        }
+
+        try { panel.layout.layout(true); } catch(e) {}
     };
 
     // ── onClick: Add to Media Encoder ─────────────────────────

@@ -867,21 +867,39 @@ class App(tk.Tk):
                     self.after(0, progress_var.set,
                                f"[{current}/{total}] {status}  {name}")
 
-                updated, failed = updater.apply_update(on_progress)
+                updated, failed, ae_results = updater.apply_update(on_progress)
                 self.after(0, prog_win.destroy)
 
-                if failed:
-                    msg = f"Updated {len(updated)} file(s). {len(failed)} failed:\n" + \
-                          "\n".join(failed)
-                    self.after(0, lambda: mb.showwarning("Update", msg))
+                # Build result message
+                lines = [f"✓ Updated {len(updated)} file(s)."]
+
+                if ae_results:
+                    ae_ok  = [r for r in ae_results if r[1]]
+                    ae_bad = [r for r in ae_results if not r[1]]
+                    if ae_ok:
+                        lines.append(f"\n✓ AE extension installed in {len(ae_ok)} location(s).")
+                    if ae_bad:
+                        lines.append(f"\n⚠ AE extension failed in {len(ae_bad)} location(s):\n"
+                                     + "\n".join(f"  {r[0]}: {r[2]}" for r in ae_bad))
                 else:
-                    self.after(0, lambda: mb.showinfo(
-                        "Update complete",
-                        f"Successfully installed v{remote}.\n\nPlease restart the app."
-                    ))
-                    if self._update_banner:
-                        self.after(0, self._update_banner.destroy)
-                        self._update_banner = None
+                    lines.append("\nℹ AE extension: no After Effects installation found.\n"
+                                 "  Copy 'Lineup Panel.jsx' manually to:\n"
+                                 "  Adobe AE → Support Files → Scripts → ScriptUI Panels")
+
+                if failed:
+                    lines.append(f"\n⚠ {len(failed)} file(s) failed:\n" + "\n".join(failed))
+
+                lines.append("\n\nPlease restart the app.")
+                msg = "\n".join(lines)
+
+                if failed or (ae_results and any(not r[1] for r in ae_results)):
+                    self.after(0, lambda: mb.showwarning(f"Update v{remote}", msg))
+                else:
+                    self.after(0, lambda: mb.showinfo(f"Update v{remote} complete", msg))
+
+                if self._update_banner:
+                    self.after(0, self._update_banner.destroy)
+                    self._update_banner = None
             except Exception as e:
                 self.after(0, prog_win.destroy)
                 self.after(0, lambda: mb.showerror("Update failed", str(e)))

@@ -3,6 +3,7 @@
 updater.py — Auto-updater for Flashscore Ratings
 =================================================
 Checks GitHub for a newer version and downloads updated files.
+Also reinstalls the After Effects extension (Lineup Panel.jsx) automatically.
 
 Usage (standalone):
     python updater.py
@@ -11,13 +12,13 @@ Used internally by launcher.py for startup check and one-click update.
 """
 
 import sys
+import shutil
 from pathlib import Path
 
 BASE_DIR     = Path(__file__).parent
 VERSION_FILE = BASE_DIR / "version.txt"
 
 # ── GitHub config ─────────────────────────────────────────────────
-# Set these to your actual GitHub username and repo name.
 GITHUB_OWNER = "dsquash"
 GITHUB_REPO  = "flashscore-ratings"
 BRANCH       = "main"
@@ -25,7 +26,7 @@ BRANCH       = "main"
 
 RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{BRANCH}"
 
-# Files that will be replaced on update (user data is never touched)
+# Files downloaded from GitHub on every update
 UPDATABLE_FILES = [
     "launcher.py",
     "run.py",
@@ -38,6 +39,8 @@ UPDATABLE_FILES = [
     "START HERE.bat",
     "version.txt",
 ]
+
+AE_PANEL_FILE = "Lineup Panel.jsx"
 
 
 # ── Version helpers ───────────────────────────────────────────────
@@ -82,13 +85,50 @@ def check_for_update(timeout: int = 8) -> tuple:
         return False, local, "?"
 
 
+# ── AE extension installer ────────────────────────────────────────
+
+def find_ae_script_folders() -> list:
+    """
+    Returns all After Effects ScriptUI Panels folders found on this machine.
+    Searches standard Program Files paths for any AE version.
+    """
+    import os
+    folders = []
+    base = Path("C:/Program Files/Adobe")
+    if base.exists():
+        for ae_dir in base.glob("Adobe After Effects*"):
+            panel_dir = ae_dir / "Support Files" / "Scripts" / "ScriptUI Panels"
+            if panel_dir.exists():
+                folders.append(panel_dir)
+    return folders
+
+
+def install_ae_extension(panel_src: Path) -> list:
+    """
+    Copies Lineup Panel.jsx to all detected AE ScriptUI Panels folders.
+    Returns list of (path, success, error_msg) tuples.
+    """
+    results = []
+    ae_folders = find_ae_script_folders()
+    for folder in ae_folders:
+        dest = folder / AE_PANEL_FILE
+        try:
+            shutil.copy2(str(panel_src), str(dest))
+            results.append((str(folder), True, ""))
+        except Exception as e:
+            results.append((str(folder), False, str(e)))
+    return results
+
+
 # ── Apply update ──────────────────────────────────────────────────
 
-def apply_update(progress_cb=None) -> list:
+def apply_update(progress_cb=None) -> tuple:
     """
     Downloads each file in UPDATABLE_FILES from GitHub and saves it locally.
-    progress_cb(current, total, filename) called after each file.
-    Returns list of successfully updated filenames.
+    Then installs the AE extension to all detected AE folders.
+
+    progress_cb(current, total, label, ok) called after each step.
+    Returns (updated: list, failed: list, ae_results: list).
     """
     updated = []
     failed  = []
@@ -97,17 +137,25 @@ def apply_update(progress_cb=None) -> list:
     for i, filename in enumerate(UPDATABLE_FILES):
         url  = f"{RAW_BASE}/{filename}"
         dest = BASE_DIR / filename
+        ok   = False
         try:
             data = _fetch_url(url, timeout=30)
             dest.write_bytes(data)
             updated.append(filename)
+            ok = True
         except Exception as e:
             failed.append(f"{filename}: {e}")
 
         if progress_cb:
-            progress_cb(i + 1, total, filename, filename not in [f.split(":")[0] for f in failed])
+            progress_cb(i + 1, total, filename, ok)
 
-    return updated, failed
+    # Install AE extension
+    ae_results = []
+    panel_src = BASE_DIR / AE_PANEL_FILE
+    if panel_src.exists():
+        ae_results = install_ae_extension(panel_src)
+
+    return updated, failed, ae_results
 
 
 def get_changelog() -> str:
@@ -138,7 +186,6 @@ if __name__ == "__main__":
 
     changelog = get_changelog()
     if changelog:
-        # Print only the first section (latest release notes)
         lines = changelog.splitlines()
         for line in lines[1:]:
             if line.startswith("## ") and not line.startswith(f"## v{remote}"):
@@ -157,11 +204,22 @@ if __name__ == "__main__":
         status = "✓" if ok else "✗"
         print(f"  [{current}/{total}] {status}  {name}")
 
-    updated, failed = apply_update(prog)
+    updated, failed, ae_results = apply_update(prog)
 
     print(f"\nUpdated {len(updated)} file(s).")
+
+    if ae_results:
+        print("\nAfter Effects extension:")
+        for path, ok, err in ae_results:
+            if ok:
+                print(f"  ✓ Installed → {path}")
+            else:
+                print(f"  ✗ Failed ({path}): {err}")
+    elif not ae_results:
+        print("\nAfter Effects: no AE installation found (copy Lineup Panel.jsx manually).")
+
     if failed:
-        print(f"Failed ({len(failed)}):")
+        print(f"\nFailed ({len(failed)}):")
         for f in failed:
             print(f"  {f}")
 

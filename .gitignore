@@ -1,0 +1,21 @@
+# ── After Effects project & footage ──────────────────────────────
+*.aep
+*.aep_AME
+(Footage)/
+
+# ── Match output (per-match data, images, debug files) ───────────
+flashscore_output/
+
+# ── Python cache ─────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Files marked for deletion ────────────────────────────────────
+POATE FI STERS*/
+
+# ── OS / editor noise ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak

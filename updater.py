@@ -54,6 +54,13 @@ def get_local_version() -> str:
 
 def _fetch_url(url: str, timeout: int = 10) -> bytes:
     import urllib.request
+    from urllib.parse import quote
+    # Encode only the path portion to handle spaces and special chars in filenames
+    if "raw.githubusercontent.com" in url:
+        parts = url.split("/", 7)  # split up to the filename part
+        if len(parts) == 8:
+            parts[7] = quote(parts[7], safe="/")
+            url = "/".join(parts)
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return r.read()
 
@@ -107,17 +114,42 @@ def find_ae_script_folders() -> list:
 def install_ae_extension(panel_src: Path) -> list:
     """
     Copies Lineup Panel.jsx to all detected AE ScriptUI Panels folders.
+    On permission errors, retries via PowerShell (elevated copy).
     Returns list of (path, success, error_msg) tuples.
     """
+    import subprocess
     results = []
     ae_folders = find_ae_script_folders()
     for folder in ae_folders:
         dest = folder / AE_PANEL_FILE
+        ok = False
+        err_msg = ""
+        # First try direct copy
         try:
             shutil.copy2(str(panel_src), str(dest))
-            results.append((str(folder), True, ""))
+            ok = True
+        except PermissionError:
+            # Retry via PowerShell with elevated privileges (UAC prompt)
+            try:
+                ps_cmd = (
+                    f'Copy-Item -Path "{panel_src}" -Destination "{dest}" -Force'
+                )
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     f'Start-Process powershell -ArgumentList \'-NoProfile -Command "{ps_cmd}"\''
+                     ' -Verb RunAs -Wait'],
+                    capture_output=True, timeout=30
+                )
+                # Verify the copy succeeded
+                if dest.exists():
+                    ok = True
+                else:
+                    err_msg = "Copy via UAC failed — try running the app as Administrator."
+            except Exception as e2:
+                err_msg = f"Permission denied. Run as Administrator to install AE extension. ({e2})"
         except Exception as e:
-            results.append((str(folder), False, str(e)))
+            err_msg = str(e)
+        results.append((str(folder), ok, err_msg))
     return results
 
 

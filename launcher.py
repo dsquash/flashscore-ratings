@@ -10,6 +10,7 @@ from tkinter import ttk, scrolledtext
 import subprocess
 import threading
 import re
+import sys
 import json
 from pathlib import Path
 
@@ -17,6 +18,19 @@ BASE_DIR  = Path(__file__).parent
 LAST_URL  = BASE_DIR / "flashscore_output" / "last_url.txt"
 RUN_PY    = BASE_DIR / "run.py"
 OVERRIDES = BASE_DIR / "sofifa_overrides.json"
+
+# ── Platform-aware fonts ──────────────────────────────────────────
+# UI_FONT / MONO_FONT are Windows-only — fall back to the right
+# native family per OS so the UI doesn't look broken on Mac/Linux.
+if sys.platform == "darwin":
+    UI_FONT   = "Helvetica Neue"   # matches macOS system UI
+    MONO_FONT = "Menlo"            # default macOS monospace
+elif sys.platform.startswith("win"):
+    UI_FONT   = "Segoe UI"
+    MONO_FONT = "Consolas"
+else:
+    UI_FONT   = "DejaVu Sans"
+    MONO_FONT = "DejaVu Sans Mono"
 
 # ── Colors ────────────────────────────────────────────────────────
 BG        = "#1a1d24"
@@ -29,6 +43,29 @@ FG        = "#e8eaf0"
 FG_DIM    = "#7a8099"
 RED       = "#e74c3c"
 YELLOW    = "#f1c40f"
+
+# ── macOS Aqua fix ────────────────────────────────────────────────
+# On macOS, tk.Button ignores bg/fg (native Aqua renderer). Patch the
+# widget classes so every Button/Radiobutton auto-sets highlightbackground
+# to the window BG — this removes the default gray halo and lets the
+# dark theme blend in. Colors on the button face itself still fall back
+# to native (Mac limitation), but the UI looks far less broken.
+if sys.platform == "darwin":
+    _OrigButton = tk.Button
+    _OrigRadiobutton = tk.Radiobutton
+
+    class _MacButton(_OrigButton):
+        def __init__(self, master=None, **kw):
+            kw.setdefault("highlightbackground", BG)
+            super().__init__(master, **kw)
+
+    class _MacRadiobutton(_OrigRadiobutton):
+        def __init__(self, master=None, **kw):
+            kw.setdefault("highlightbackground", BG)
+            super().__init__(master, **kw)
+
+    tk.Button = _MacButton
+    tk.Radiobutton = _MacRadiobutton
 
 
 def read_last_url():
@@ -66,7 +103,12 @@ class App(tk.Tk):
         self.title("Flashscore Ratings")
         self.configure(bg=BG)
         self.resizable(True, True)
-        self.minsize(580, 500)
+        # Mac widgets render a touch larger — give the window more room
+        if sys.platform == "darwin":
+            self.minsize(720, 560)
+            self.geometry("760x620")
+        else:
+            self.minsize(580, 500)
 
         self._proc            = None
         self._running         = False
@@ -84,12 +126,12 @@ class App(tk.Tk):
         # ── Header ────────────────────────────────────────────────
         hdr = tk.Frame(self, bg=BG, pady=12)
         hdr.pack(fill="x", padx=20)
-        tk.Label(hdr, text="⚽  Flashscore Ratings", font=("Segoe UI", 16, "bold"),
+        tk.Label(hdr, text="⚽  Flashscore Ratings", font=(UI_FONT, 16, "bold"),
                  bg=BG, fg=FG).pack(side="left")
 
         self.btn_check_update = tk.Button(
             hdr, text="⬆  Check for Updates",
-            font=("Segoe UI", 8), bg=BTN_GRAY, fg=FG_DIM,
+            font=(UI_FONT, 8), bg=BTN_GRAY, fg=FG_DIM,
             relief="flat", cursor="hand2",
             activebackground="#4d5268", activeforeground=FG,
             command=self._check_update_manual, padx=8, pady=3
@@ -100,7 +142,7 @@ class App(tk.Tk):
         url_frame = tk.Frame(self, bg=BG2, pady=14, padx=16)
         url_frame.pack(fill="x", padx=16, pady=(0, 8))
 
-        tk.Label(url_frame, text="Flashscore URL", font=("Segoe UI", 9),
+        tk.Label(url_frame, text="Flashscore URL", font=(UI_FONT, 9),
                  bg=BG2, fg=FG_DIM).pack(anchor="w")
 
         entry_row = tk.Frame(url_frame, bg=BG2)
@@ -109,7 +151,7 @@ class App(tk.Tk):
         self.url_var = tk.StringVar()
         self.url_entry = tk.Entry(
             entry_row, textvariable=self.url_var,
-            font=("Segoe UI", 10), bg="#2d3147", fg=FG,
+            font=(UI_FONT, 10), bg="#2d3147", fg=FG,
             insertbackground=FG, relief="flat",
             highlightthickness=1, highlightbackground="#3d4255",
             highlightcolor=ACCENT
@@ -117,7 +159,7 @@ class App(tk.Tk):
         self.url_entry.pack(side="left", fill="x", expand=True, ipady=6)
 
         btn_paste = tk.Button(
-            entry_row, text="📋 Paste", font=("Segoe UI", 9),
+            entry_row, text="📋 Paste", font=(UI_FONT, 9),
             bg=BTN_GRAY, fg=FG, relief="flat", cursor="hand2",
             activebackground="#4d5268", activeforeground=FG,
             command=self._paste_url, padx=10
@@ -125,7 +167,7 @@ class App(tk.Tk):
         btn_paste.pack(side="left", padx=(6, 0))
 
         btn_clear = tk.Button(
-            entry_row, text="✕", font=("Segoe UI", 9),
+            entry_row, text="✕", font=(UI_FONT, 9),
             bg=BTN_GRAY, fg=FG_DIM, relief="flat", cursor="hand2",
             activebackground="#4d5268", activeforeground=FG,
             command=lambda: self.url_var.set(""), padx=8
@@ -136,13 +178,13 @@ class App(tk.Tk):
         type_frame = tk.Frame(self, bg=BG, pady=4)
         type_frame.pack(fill="x", padx=20)
 
-        tk.Label(type_frame, text="Match type:", font=("Segoe UI", 10),
+        tk.Label(type_frame, text="Match type:", font=(UI_FONT, 10),
                  bg=BG, fg=FG_DIM).pack(side="left", padx=(0, 12))
 
         self.match_type = tk.StringVar(value="club")
 
         rb_style = dict(bg=BG, fg=FG, selectcolor=BG2, activebackground=BG,
-                        activeforeground=FG, font=("Segoe UI", 10),
+                        activeforeground=FG, font=(UI_FONT, 10),
                         relief="flat", cursor="hand2")
         tk.Radiobutton(type_frame, text="Club",
                        variable=self.match_type, value="club",
@@ -157,7 +199,7 @@ class App(tk.Tk):
 
         self.btn_run = tk.Button(
             btn_frame, text="▶  Full Run",
-            font=("Segoe UI", 11, "bold"),
+            font=(UI_FONT, 11, "bold"),
             bg=BTN_GREEN, fg="white", relief="flat", cursor="hand2",
             activebackground="#2ecc71", activeforeground="white",
             command=self._run_full, padx=20, pady=8
@@ -166,7 +208,7 @@ class App(tk.Tk):
 
         self.btn_refresh = tk.Button(
             btn_frame, text="↻  Refresh Stats",
-            font=("Segoe UI", 11),
+            font=(UI_FONT, 11),
             bg=BTN_BLUE, fg="white", relief="flat", cursor="hand2",
             activebackground="#3498db", activeforeground="white",
             command=self._run_refresh, padx=20, pady=8
@@ -175,7 +217,7 @@ class App(tk.Tk):
 
         self.btn_redownload = tk.Button(
             btn_frame, text="⬇  Re-download overrides",
-            font=("Segoe UI", 10),
+            font=(UI_FONT, 10),
             bg="#2a3050", fg="#a0b0ff", relief="flat", cursor="hand2",
             activebackground="#3a4060", activeforeground="#c0d0ff",
             command=self._run_redownload, padx=14, pady=8
@@ -184,7 +226,7 @@ class App(tk.Tk):
 
         self.btn_stop = tk.Button(
             btn_frame, text="■  Stop",
-            font=("Segoe UI", 10),
+            font=(UI_FONT, 10),
             bg=BTN_GRAY, fg=FG_DIM, relief="flat", cursor="hand2",
             activebackground="#4d5268", activeforeground=FG,
             command=self._stop, padx=14, pady=8,
@@ -194,7 +236,7 @@ class App(tk.Tk):
 
         self.btn_reset = tk.Button(
             btn_frame, text="🗑  Reset",
-            font=("Segoe UI", 10),
+            font=(UI_FONT, 10),
             bg="#5a2020", fg="#ff8080", relief="flat", cursor="hand2",
             activebackground="#7a2828", activeforeground="#ffaaaa",
             command=self._confirm_reset, padx=14, pady=8
@@ -203,7 +245,7 @@ class App(tk.Tk):
 
         tk.Button(
             btn_frame, text="✏  Overrides",
-            font=("Segoe UI", 10),
+            font=(UI_FONT, 10),
             bg="#2a3a2a", fg="#7ecb7e", relief="flat", cursor="hand2",
             activebackground="#3a4a3a", activeforeground="#a0e0a0",
             command=self._open_overrides, padx=14, pady=8
@@ -213,7 +255,7 @@ class App(tk.Tk):
         self.status_var = tk.StringVar(value="Ready.")
         status_bar = tk.Label(
             self, textvariable=self.status_var,
-            font=("Segoe UI", 9), bg=BG2, fg=FG_DIM,
+            font=(UI_FONT, 9), bg=BG2, fg=FG_DIM,
             anchor="w", padx=12, pady=4
         )
         status_bar.pack(fill="x", padx=16, pady=(4, 0))
@@ -224,16 +266,16 @@ class App(tk.Tk):
 
         log_header = tk.Frame(log_frame, bg=BG)
         log_header.pack(fill="x")
-        tk.Label(log_header, text="Output", font=("Segoe UI", 9),
+        tk.Label(log_header, text="Output", font=(UI_FONT, 9),
                  bg=BG, fg=FG_DIM).pack(side="left")
-        tk.Button(log_header, text="Clear log", font=("Segoe UI", 8),
+        tk.Button(log_header, text="Clear log", font=(UI_FONT, 8),
                   bg=BTN_GRAY, fg=FG_DIM, relief="flat", cursor="hand2",
                   activebackground="#4d5268", activeforeground=FG,
                   command=self._clear_log, padx=8, pady=1
                   ).pack(side="right")
 
         self.log = scrolledtext.ScrolledText(
-            log_frame, font=("Consolas", 9),
+            log_frame, font=(MONO_FONT, 9),
             bg="#12141c", fg="#c8d0e0",
             insertbackground=FG, relief="flat",
             wrap="word", state="disabled"
@@ -243,7 +285,7 @@ class App(tk.Tk):
         # ── Footer ────────────────────────────────────────────────
         tk.Label(
             self, text="Marian Grosu  ·  Flashscore Ratings",
-            font=("Segoe UI", 8), bg=BG, fg=FG_DIM,
+            font=(UI_FONT, 8), bg=BG, fg=FG_DIM,
             anchor="center"
         ).pack(fill="x", pady=(4, 6))
 
@@ -258,13 +300,13 @@ class App(tk.Tk):
         self.missing_frame = tk.Frame(self, bg="#2a1f10", pady=6)
         self.missing_label = tk.Label(
             self.missing_frame,
-            text="", font=("Segoe UI", 9, "bold"),
+            text="", font=(UI_FONT, 9, "bold"),
             bg="#2a1f10", fg=YELLOW, anchor="w"
         )
         self.missing_label.pack(side="left", padx=(12, 8))
         tk.Button(
             self.missing_frame, text="→ Fill in overrides",
-            font=("Segoe UI", 9, "bold"),
+            font=(UI_FONT, 9, "bold"),
             bg="#c47c00", fg="white", relief="flat", cursor="hand2",
             activebackground="#e09000", activeforeground="white",
             command=self._open_overrides_for_missing, padx=10, pady=3
@@ -473,26 +515,26 @@ class App(tk.Tk):
         win.resizable(False, False)
         win.grab_set()
 
-        tk.Label(win, text="Refresh Stats", font=("Segoe UI", 13, "bold"),
+        tk.Label(win, text="Refresh Stats", font=(UI_FONT, 13, "bold"),
                  bg=BG, fg=FG).pack(pady=(18, 4), padx=24)
         tk.Frame(win, bg="#2a3050", height=1).pack(fill="x", padx=20, pady=(0, 10))
 
         lines = text.splitlines()
         if lines:
-            tk.Label(win, text=lines[0], font=("Segoe UI", 11, "bold"),
+            tk.Label(win, text=lines[0], font=(UI_FONT, 11, "bold"),
                      bg=BG, fg="#a0b0ff").pack(padx=24, pady=(0, 6))
 
         body = "\n".join(lines[2:]) if len(lines) > 2 else ""
         if body:
             color = "#f0c040" if not body.strip().startswith("No changes") else "#60d080"
-            tk.Label(win, text=body, font=("Segoe UI", 10),
+            tk.Label(win, text=body, font=(UI_FONT, 10),
                      bg=BG, fg=color, justify="left", anchor="w").pack(
                 padx=28, pady=(0, 12), fill="x")
         else:
-            tk.Label(win, text="No changes detected.", font=("Segoe UI", 10),
+            tk.Label(win, text="No changes detected.", font=(UI_FONT, 10),
                      bg=BG, fg="#60d080").pack(padx=24, pady=(0, 12))
 
-        tk.Button(win, text="OK", font=("Segoe UI", 10, "bold"),
+        tk.Button(win, text="OK", font=(UI_FONT, 10, "bold"),
                   bg=BTN_BLUE, fg="white", relief="flat", cursor="hand2",
                   padx=28, pady=6, command=win.destroy).pack(pady=(0, 16))
 
@@ -545,12 +587,12 @@ class App(tk.Tk):
         tk.Label(
             win,
             text="Manual mappings: Flashscore name  →  SoFIFA player page URL",
-            font=("Segoe UI", 9), bg=BG, fg=FG_DIM
+            font=(UI_FONT, 9), bg=BG, fg=FG_DIM
         ).pack(anchor="w", padx=14, pady=(10, 2))
         tk.Label(
             win,
             text="Example: 'Inacio'  →  https://sofifa.com/player/262622/samuele-inacio-pia/",
-            font=("Consolas", 8), bg=BG, fg="#555c7a"
+            font=(MONO_FONT, 8), bg=BG, fg="#555c7a"
         ).pack(anchor="w", padx=14, pady=(0, 4))
 
         prefill        = [p for p in (prefill or []) if p]
@@ -566,7 +608,7 @@ class App(tk.Tk):
 
                 tk.Label(pf_outer,
                          text=f"⚠  {len(to_fill)} player(s) not found — paste their SoFIFA URL:",
-                         font=("Segoe UI", 9, "bold"), bg=BG2, fg=YELLOW
+                         font=(UI_FONT, 9, "bold"), bg=BG2, fg=YELLOW
                          ).pack(anchor="w", pady=(0, 6))
 
                 for player_name in to_fill:
@@ -577,11 +619,11 @@ class App(tk.Tk):
                     url_var  = tk.StringVar()
 
                     tk.Label(row, textvariable=name_var,
-                             font=("Segoe UI", 10, "bold"), bg=BG2, fg=FG,
+                             font=(UI_FONT, 10, "bold"), bg=BG2, fg=FG,
                              width=18, anchor="w").pack(side="left", padx=(0, 8))
 
                     url_entry = tk.Entry(row, textvariable=url_var,
-                                         font=("Segoe UI", 9),
+                                         font=(UI_FONT, 9),
                                          bg="#2d3147", fg=FG, insertbackground=FG,
                                          relief="flat", highlightthickness=1,
                                          highlightbackground="#3d4255")
@@ -594,7 +636,7 @@ class App(tk.Tk):
                         except Exception:
                             pass
 
-                    tk.Button(row, text="📋", font=("Segoe UI", 9),
+                    tk.Button(row, text="📋", font=(UI_FONT, 9),
                               bg=BTN_GRAY, fg=FG, relief="flat", cursor="hand2",
                               activebackground="#4d5268",
                               command=make_paste, padx=6, pady=3
@@ -619,7 +661,7 @@ class App(tk.Tk):
                         self._update_missing_banner(remaining)
 
                 tk.Button(pf_outer, text="💾  Save all",
-                          font=("Segoe UI", 10, "bold"),
+                          font=(UI_FONT, 10, "bold"),
                           bg=BTN_GREEN, fg="white", relief="flat", cursor="hand2",
                           activebackground="#2ecc71",
                           command=save_pending, padx=14, pady=5
@@ -641,10 +683,10 @@ class App(tk.Tk):
         style.configure("Treeview",
                          background=BG2, foreground=FG,
                          fieldbackground=BG2, rowheight=22,
-                         font=("Consolas", 9))
+                         font=(MONO_FONT, 9))
         style.configure("Treeview.Heading",
                          background="#2d3147", foreground=FG_DIM,
-                         font=("Segoe UI", 9))
+                         font=(UI_FONT, 9))
         style.map("Treeview", background=[("selected", "#3a4066")])
 
         sb = tk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
@@ -668,17 +710,17 @@ class App(tk.Tk):
         add_frame = tk.Frame(win, bg=BG, pady=6)
         add_frame.pack(fill="x", padx=14)
 
-        tk.Label(add_frame, text="Flashscore name:", font=("Segoe UI", 9),
+        tk.Label(add_frame, text="Flashscore name:", font=(UI_FONT, 9),
                  bg=BG, fg=FG_DIM).grid(row=0, column=0, sticky="w", padx=(0, 6))
-        entry_name = tk.Entry(add_frame, font=("Segoe UI", 10),
+        entry_name = tk.Entry(add_frame, font=(UI_FONT, 10),
                               bg="#2d3147", fg=FG, insertbackground=FG,
                               relief="flat", highlightthickness=1,
                               highlightbackground="#3d4255", width=18)
         entry_name.grid(row=0, column=1, sticky="ew", padx=(0, 10))
 
-        tk.Label(add_frame, text="SoFIFA URL:", font=("Segoe UI", 9),
+        tk.Label(add_frame, text="SoFIFA URL:", font=(UI_FONT, 9),
                  bg=BG, fg=FG_DIM).grid(row=0, column=2, sticky="w", padx=(0, 6))
-        entry_url = tk.Entry(add_frame, font=("Segoe UI", 10),
+        entry_url = tk.Entry(add_frame, font=(UI_FONT, 10),
                              bg="#2d3147", fg=FG, insertbackground=FG,
                              relief="flat", highlightthickness=1,
                              highlightbackground="#3d4255", width=34)
@@ -704,12 +746,12 @@ class App(tk.Tk):
             except Exception:
                 pass
 
-        tk.Button(add_frame, text="+ Add", font=("Segoe UI", 9, "bold"),
+        tk.Button(add_frame, text="+ Add", font=(UI_FONT, 9, "bold"),
                   bg=BTN_GREEN, fg="white", relief="flat", cursor="hand2",
                   activebackground="#2ecc71", command=do_add,
                   padx=10, pady=4).grid(row=0, column=4, padx=(0, 4))
 
-        tk.Button(add_frame, text="📋", font=("Segoe UI", 9),
+        tk.Button(add_frame, text="📋", font=(UI_FONT, 9),
                   bg=BTN_GRAY, fg=FG, relief="flat", cursor="hand2",
                   activebackground="#4d5268", command=do_paste_url,
                   padx=6, pady=4).grid(row=0, column=5)
@@ -727,12 +769,12 @@ class App(tk.Tk):
         btn_row = tk.Frame(win, bg=BG, pady=4)
         btn_row.pack(fill="x", padx=14, pady=(0, 10))
         tk.Button(btn_row, text="🗑 Delete selected",
-                  font=("Segoe UI", 9), bg="#5a2020", fg="#ff8080",
+                  font=(UI_FONT, 9), bg="#5a2020", fg="#ff8080",
                   relief="flat", cursor="hand2",
                   activebackground="#7a2828", activeforeground="#ffaaaa",
                   command=do_delete, padx=10, pady=4).pack(side="left")
         tk.Button(btn_row, text="Close",
-                  font=("Segoe UI", 9), bg=BTN_GRAY, fg=FG,
+                  font=(UI_FONT, 9), bg=BTN_GRAY, fg=FG,
                   relief="flat", cursor="hand2",
                   activebackground="#4d5268",
                   command=win.destroy, padx=10, pady=4).pack(side="right")
@@ -771,12 +813,12 @@ class App(tk.Tk):
         tk.Label(
             banner,
             text=f"⬆  Update available: v{local}  →  v{remote}",
-            font=("Segoe UI", 9, "bold"), bg="#1e3a1e", fg="#7ecb7e"
+            font=(UI_FONT, 9, "bold"), bg="#1e3a1e", fg="#7ecb7e"
         ).pack(side="left", padx=(14, 12))
 
         tk.Button(
             banner, text="Update now",
-            font=("Segoe UI", 9, "bold"),
+            font=(UI_FONT, 9, "bold"),
             bg=BTN_GREEN, fg="white", relief="flat", cursor="hand2",
             activebackground="#2ecc71",
             command=lambda: self._do_update(remote),
@@ -784,7 +826,7 @@ class App(tk.Tk):
         ).pack(side="left")
 
         tk.Button(
-            banner, text="✕", font=("Segoe UI", 8),
+            banner, text="✕", font=(UI_FONT, 8),
             bg="#1e3a1e", fg="#7ecb7e", relief="flat", cursor="hand2",
             command=banner.destroy, padx=6
         ).pack(side="right", padx=8)
@@ -846,11 +888,11 @@ class App(tk.Tk):
         prog_win.resizable(False, False)
         prog_win.grab_set()
 
-        tk.Label(prog_win, text=f"Installing v{remote}...", font=("Segoe UI", 11, "bold"),
+        tk.Label(prog_win, text=f"Installing v{remote}...", font=(UI_FONT, 11, "bold"),
                  bg=BG, fg=FG).pack(pady=(18, 6), padx=24)
 
         progress_var = tk.StringVar(value="Starting...")
-        tk.Label(prog_win, textvariable=progress_var, font=("Consolas", 9),
+        tk.Label(prog_win, textvariable=progress_var, font=(MONO_FONT, 9),
                  bg=BG, fg=FG_DIM, justify="left").pack(padx=24, pady=(0, 14))
 
         prog_win.update_idletasks()

@@ -201,3 +201,8 @@ echo "   For help, reach out to Marian Grosu."
 echo " ============================================================"
 echo ""
 read -p "Press Enter to close..."
+
+# Auto-close the Terminal window (macOS Terminal.app + iTerm2 best-effort)
+osascript -e 'tell application "Terminal" to close (every window whose tty contains "'$(tty | sed 's|/dev/||')'")' 2>/dev/null &
+osascript -e 'tell application "iTerm" to close current window' 2>/dev/null &
+exit 0

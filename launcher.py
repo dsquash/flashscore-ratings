@@ -530,7 +530,9 @@ class App(tk.Tk):
 
         write_match_type(self.match_type.get())
 
-        cmd = ["python", str(BASE_DIR / script)]
+        # Use the same Python interpreter that's running the launcher
+        # (sys.executable). On Mac "python" doesn't exist, only "python3".
+        cmd = [sys.executable, str(BASE_DIR / script)]
         if url and script == "run.py":
             cmd.append(url)
         if extra_args:

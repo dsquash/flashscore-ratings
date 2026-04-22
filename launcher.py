@@ -32,102 +32,128 @@ else:
     UI_FONT   = "DejaVu Sans"
     MONO_FONT = "DejaVu Sans Mono"
 
-# ── Colors ────────────────────────────────────────────────────────
-BG        = "#1a1d24"
-BG2       = "#23273a"
-ACCENT    = "#4f8ef7"
-BTN_GREEN = "#27ae60"
-BTN_BLUE  = "#2980b9"
-BTN_GRAY  = "#3d4255"
-FG        = "#e8eaf0"
-FG_DIM    = "#7a8099"
-RED       = "#e74c3c"
-YELLOW    = "#f1c40f"
-
-# ── macOS Tk shim ─────────────────────────────────────────────────
-# The stock Python 3 on macOS (/usr/bin/python3) ships Tcl/Tk 8.5 which
-# renders tk.Label and tk.Entry incorrectly with custom bg/fg (text ends
-# up invisible). Workaround: redirect those two widgets through ttk with
-# the 'clam' theme, which honours bg/fg on every platform and Tk version.
-# We also patch tk.Button/Radiobutton so the Aqua halo matches the dark
-# theme.
+# ── Colors (platform-aware) ───────────────────────────────────────
+# macOS Aqua (Tk 8.5 on system Python, Tk 8.6 on python.org Python)
+# refuses to render dark themes reliably — text on dark bg ends up
+# invisible. We give Mac a clean light theme that plays nice with
+# Aqua, and keep the original dark theme for Windows/Linux.
 if sys.platform == "darwin":
-    _style_cache = {}
+    BG        = "#ececec"  # app background (system-ish gray)
+    BG2       = "#ffffff"  # card / input area background
+    ACCENT    = "#007aff"  # system blue
+    BTN_GREEN = "#34c759"
+    BTN_BLUE  = "#007aff"
+    BTN_GRAY  = "#d2d2d7"
+    FG        = "#1d1d1f"  # near-black text
+    FG_DIM    = "#6e6e73"  # secondary text
+    RED       = "#ff3b30"
+    YELLOW    = "#ff9500"
+else:
+    BG        = "#1a1d24"
+    BG2       = "#23273a"
+    ACCENT    = "#4f8ef7"
+    BTN_GREEN = "#27ae60"
+    BTN_BLUE  = "#2980b9"
+    BTN_GRAY  = "#3d4255"
+    FG        = "#e8eaf0"
+    FG_DIM    = "#7a8099"
+    RED       = "#e74c3c"
+    YELLOW    = "#f1c40f"
 
-    def _mac_style(kind, bg, fg, font):
-        """Create/return a ttk style that matches the requested colors."""
-        key = (kind, bg, fg, str(font))
-        if key in _style_cache:
-            return _style_cache[key]
-        s = ttk.Style()
-        try:
-            s.theme_use("clam")
-        except Exception:
-            pass
-        name = f"FS{len(_style_cache)}.T{kind}"
-        opts = {}
-        if bg is not None:
-            opts["background"] = bg
-            if kind == "Entry":
-                opts["fieldbackground"] = bg
-        if fg is not None:
-            opts["foreground"] = fg
-        if font is not None:
-            opts["font"] = font
-        s.configure(name, **opts)
-        _style_cache[key] = name
-        return name
+# ── Hardcoded-hex remap for Mac ───────────────────────────────────
+# The body of this file has some one-off hex colors baked in that were
+# picked for the dark theme. Instead of rewriting every call site, we
+# intercept widget creation on macOS and remap any known-dark hex to a
+# light equivalent so Aqua renders everything correctly.
+if sys.platform == "darwin":
+    _COLOR_REMAP = {
+        "#1a1d24": BG,
+        "#23273a": BG2,
+        "#2d3147": "#ffffff",      # URL entry bg
+        "#3d4255": "#d2d2d7",      # borders / BTN_GRAY
+        "#12141c": "#ffffff",      # log bg
+        "#c8d0e0": "#1d1d1f",      # log fg
+        "#e8eaf0": FG,
+        "#7a8099": FG_DIM,
+        "#2a3050": "#eef1f6",
+        "#4d5268": "#c7c7cc",      # hover bg
+        "#2a1f10": "#fff4e0",      # missing players banner
+        "#2a3a2a": "#e6f5ea",      # overrides btn
+        "#3a4a3a": "#d2ebd8",      # overrides hover
+        "#5a2020": "#ffe5e5",      # reset btn
+        "#7a2828": "#ffd0d0",      # reset hover
+        "#7ecb7e": "#1e7d34",      # overrides fg
+        "#a0e0a0": "#0f5c20",      # overrides active fg
+        "#ff8080": "#c62828",      # reset fg
+        "#ffaaaa": "#8a1515",      # reset active fg
+        "#a0b0ff": "#0050c8",      # re-download fg
+        "#c0d0ff": "#003a96",      # re-download active fg
+        "#3a4060": "#e3e7ef",      # re-download hover
+        "#555c7a": "#8e8e93",      # very dim text
+        "#2ecc71": "#34c759",      # green hover
+        "#3498db": "#1b73d3",      # blue hover
+        "#c47c00": "#ff9500",      # orange
+        "#e09000": "#e07a00",
+        "#f0c040": "#b76e00",      # summary warn
+        "#60d080": "#1e7d34",      # summary ok
+        "#27ae60": BTN_GREEN,
+        "#2980b9": BTN_BLUE,
+        "#4f8ef7": ACCENT,
+        "#e74c3c": RED,
+        "#f1c40f": YELLOW,
+    }
 
-    _LABEL_DROP = (
-        "relief", "activeforeground", "activebackground",
-        "highlightbackground", "highlightthickness", "highlightcolor",
-        "insertbackground", "selectcolor", "bd", "borderwidth",
-        "selectforeground", "selectbackground",
+    _COLOR_KEYS = (
+        "bg", "background", "fg", "foreground",
+        "activebackground", "activeforeground",
+        "highlightbackground", "highlightcolor",
+        "insertbackground", "selectcolor",
+        "selectbackground", "selectforeground",
+        "disabledbackground", "disabledforeground",
+        "readonlybackground",
     )
-    _ENTRY_DROP = (
-        "relief", "highlightbackground", "highlightthickness",
-        "highlightcolor", "insertbackground", "bd", "borderwidth",
-        "selectcolor", "disabledbackground", "readonlybackground",
-    )
 
-    class _MacLabel(ttk.Label):
-        def __init__(self, master=None, **kw):
-            bg = kw.pop("bg", None) or kw.pop("background", None)
-            fg = kw.pop("fg", None) or kw.pop("foreground", None)
-            font = kw.pop("font", None)
-            padx = kw.pop("padx", None)
-            pady = kw.pop("pady", None)
-            for k in _LABEL_DROP:
-                kw.pop(k, None)
-            if padx is not None or pady is not None:
-                kw["padding"] = (padx or 0, pady or 0, padx or 0, pady or 0)
-            kw["style"] = _mac_style("Label", bg, fg, font)
-            super().__init__(master, **kw)
+    def _remap(v):
+        if isinstance(v, str) and v.startswith("#"):
+            return _COLOR_REMAP.get(v.lower(), v)
+        return v
 
-    class _MacEntry(ttk.Entry):
-        def __init__(self, master=None, **kw):
-            bg = kw.pop("bg", None) or kw.pop("background", None)
-            fg = kw.pop("fg", None) or kw.pop("foreground", None)
-            font = kw.pop("font", None)
-            for k in _ENTRY_DROP:
-                kw.pop(k, None)
-            kw["style"] = _mac_style("Entry", bg, fg, font)
-            super().__init__(master, **kw)
+    def _remap_kw(kw):
+        for k in _COLOR_KEYS:
+            if k in kw:
+                kw[k] = _remap(kw[k])
+        return kw
 
-    class _MacButton(tk.Button):
-        def __init__(self, master=None, **kw):
-            kw.setdefault("highlightbackground", BG)
-            super().__init__(master, **kw)
+    def _patch_init(cls):
+        orig = cls.__init__
+        def new_init(self, master=None, *a, **kw):
+            _remap_kw(kw)
+            orig(self, master, *a, **kw)
+        cls.__init__ = new_init
 
-    class _MacRadiobutton(tk.Radiobutton):
-        def __init__(self, master=None, **kw):
-            kw.setdefault("highlightbackground", BG)
-            super().__init__(master, **kw)
+    def _patch_configure(cls):
+        orig_cfg = cls.configure
+        def new_cfg(self, *a, **kw):
+            _remap_kw(kw)
+            return orig_cfg(self, *a, **kw)
+        cls.configure = new_cfg
+        cls.config = new_cfg
 
-    tk.Label = _MacLabel
-    tk.Entry = _MacEntry
-    tk.Button = _MacButton
-    tk.Radiobutton = _MacRadiobutton
+    for _cls in (tk.Frame, tk.Label, tk.Entry, tk.Button,
+                 tk.Radiobutton, tk.Checkbutton, tk.Text, tk.Canvas,
+                 tk.Toplevel, tk.LabelFrame):
+        _patch_init(_cls)
+        _patch_configure(_cls)
+
+    # tk.Tk takes no `master` arg — only patch its configure
+    _patch_configure(tk.Tk)
+
+    try:
+        from tkinter import scrolledtext as _sct
+        _patch_init(_sct.ScrolledText)
+        _patch_configure(_sct.ScrolledText)
+    except Exception:
+        pass
 
 
 def read_last_url():

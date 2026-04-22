@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.5
+- macOS: switched to native light theme so Aqua renders tk.Label/tk.Entry correctly (no more invisible text)
+- macOS: color remap applied automatically at widget creation, no code changes in body
+- Windows/Linux: unchanged (dark theme preserved)
+
 ## v1.0.4
 - macOS: installer now auto-downloads official Python 3.12 from python.org if needed (Tk 8.6, proper UI)
 - macOS: fixed installer crash on `set -u` with unicode ellipsis

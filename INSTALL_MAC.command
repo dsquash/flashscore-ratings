@@ -119,22 +119,34 @@ do
 done
 
 if [ -z "$PY_BIN" ]; then
-    info "Installing Python (needed for a clean UI)…"
-    info "You may be asked for your Mac password."
+    info "Setting up Python (one-time setup for a clean UI)"
+    info "This can take 3–10 minutes. Enter your Mac password when asked."
     echo ""
+    echo "  ${DIM}─────── Setup output ───────${RESET}"
     if ! command -v brew >/dev/null 2>&1; then
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" >>"$LOG" 2>&1
+        # Show output so user sees progress and password prompt
+        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         [ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
         [ -x /usr/local/bin/brew ]    && eval "$(/usr/local/bin/brew shellenv)"
     fi
-    step "Installing Python" -- brew install python@3.12 || abort "Couldn't install Python"
+    if ! command -v brew >/dev/null 2>&1; then
+        abort "Homebrew install didn't complete"
+    fi
+    echo ""
+    echo "  ${DIM}Installing Python 3.12 (this is the big one, please wait)…${RESET}"
+    echo ""
+    brew install python@3.12 2>&1 | tail -30
+    echo "  ${DIM}────────────────────────────${RESET}"
+    echo ""
+
     for CANDIDATE in /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12; do
         if [ -x "$CANDIDATE" ] && check_tk_ok "$CANDIDATE"; then
             PY_BIN="$CANDIDATE"
             break
         fi
     done
-    [ -z "$PY_BIN" ] && abort "Installed Python but can't find a working one"
+    [ -z "$PY_BIN" ] && abort "Python installed but can't find a working one"
+    ok "Python installed"
 else
     ok "Python ready"
 fi

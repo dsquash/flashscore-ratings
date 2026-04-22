@@ -1,8 +1,5 @@
 #!/bin/bash
-# ============================================================
-#   Flashscore Ratings — Installer (macOS)
-#   Downloads only Mac-relevant files from GitHub + AE template.
-# ============================================================
+# Flashscore Ratings — macOS installer (clean UX)
 
 set -u
 
@@ -13,196 +10,235 @@ GITHUB_OWNER="dsquash"
 GITHUB_REPO="flashscore-ratings"
 BRANCH="main"
 RAW_BASE="https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${BRANCH}"
-
 GDRIVE_FOLDER_ID="1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti"
 
-# Files downloaded on macOS. Intentionally excludes Windows-only:
-#   INSTALL.bat, START HERE.bat
 MAC_FILES=(
-    "launcher.py"
-    "run.py"
-    "refresh_stats.py"
-    "updater.py"
-    "populate_lineup.jsx"
-    "reset_lineup.jsx"
-    "refresh_comps.jsx"
-    "save_template_state.jsx"
-    "Lineup Panel.jsx"
-    "sofifa_overrides.json"
-    "INSTALL_MAC.command"
-    "START_MAC.command"
-    "CHANGELOG.md"
-    "version.txt"
+    "launcher.py" "run.py" "refresh_stats.py" "updater.py"
+    "populate_lineup.jsx" "reset_lineup.jsx" "refresh_comps.jsx" "save_template_state.jsx"
+    "Lineup Panel.jsx" "sofifa_overrides.json"
+    "INSTALL_MAC.command" "START_MAC.command"
+    "CHANGELOG.md" "version.txt"
 )
 
-echo ""
-echo " ============================================================"
-echo "   Flashscore Ratings — Installer (macOS)"
-echo " ============================================================"
-echo ""
-
-# ── Check / Install Python 3 ─────────────────────────────────
-PY_BIN=""
-if command -v python3 >/dev/null 2>&1; then
-    PY_BIN="python3"
-fi
-
-if [ -z "$PY_BIN" ]; then
-    echo " [INFO] Python 3 not found. Attempting automatic install..."
-    echo ""
-    if command -v brew >/dev/null 2>&1; then
-        echo " Installing Python 3.12 via Homebrew..."
-        brew install python@3.12
-        command -v python3 >/dev/null 2>&1 && PY_BIN="python3"
-    else
-        echo " [INFO] Homebrew not found."
-        echo "        Install Homebrew first: https://brew.sh"
-        echo "        Or install Python manually: https://www.python.org/downloads/macos/"
-        echo ""
-        read -p " Install Homebrew automatically now? [y/N]: " ans
-        if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            if [ -x /opt/homebrew/bin/brew ]; then
-                eval "$(/opt/homebrew/bin/brew shellenv)"
-            elif [ -x /usr/local/bin/brew ]; then
-                eval "$(/usr/local/bin/brew shellenv)"
-            fi
-            brew install python@3.12
-            command -v python3 >/dev/null 2>&1 && PY_BIN="python3"
-        fi
-    fi
-fi
-
-if [ -z "$PY_BIN" ]; then
-    echo ""
-    echo " [ERROR] Python 3 still not available."
-    echo "         Install it from https://www.python.org/downloads/macos/ and re-run."
-    read -p "Press Enter to exit..."
-    exit 1
-fi
-echo " [OK] Python found: $($PY_BIN --version)"
-
-# ── Download only Mac-relevant files from GitHub ─────────────
-echo ""
-echo " [1/4] Downloading Mac files from GitHub..."
-FAILED=0
-for REL in "${MAC_FILES[@]}"; do
-    # URL-encode spaces in filenames
-    ENC=$(printf '%s' "$REL" | sed 's/ /%20/g')
-    URL="${RAW_BASE}/${ENC}"
-    OUT="$INSTALL_DIR/$REL"
-    if curl -fsSL "$URL" -o "$OUT"; then
-        echo "   ✓ $REL"
-    else
-        echo "   ✗ $REL  (failed)"
-        FAILED=$((FAILED+1))
-    fi
-done
-
-if [ $FAILED -gt 0 ]; then
-    echo " [WARNING] $FAILED file(s) failed to download. Check internet / repo path."
-fi
-echo " [OK] App files installed."
-
-# Make .command scripts executable (curl strips +x bit)
-chmod +x "$INSTALL_DIR"/*.command 2>/dev/null
-
-# ── Download AE template from Google Drive ───────────────────
-echo ""
-echo " [2/4] Downloading After Effects template from Google Drive..."
-$PY_BIN -m pip install --quiet --break-system-packages gdown 2>/dev/null \
-  || $PY_BIN -m pip install --quiet gdown
-if $PY_BIN -m gdown --folder "$GDRIVE_FOLDER_ID" -O "$INSTALL_DIR" --quiet 2>/dev/null; then
-    echo " [OK] After Effects template downloaded."
+# ── UI helpers ─────────────────────────────────────────────────
+if [ -t 1 ]; then
+    BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+    BLUE=$'\033[38;5;75m'; GREEN=$'\033[38;5;42m'; RED=$'\033[38;5;203m'
 else
-    echo " [WARNING] Could not download AE template automatically."
-    echo "           Download it manually from:"
-    echo "           https://drive.google.com/drive/folders/$GDRIVE_FOLDER_ID"
+    BOLD=''; DIM=''; RESET=''; BLUE=''; GREEN=''; RED=''
 fi
 
-# ── Install Python packages + Chromium ───────────────────────
-echo ""
-echo " [3/4] Installing Python packages..."
-$PY_BIN -m pip install --quiet --break-system-packages playwright httpx pillow 2>/dev/null \
-  || $PY_BIN -m pip install --quiet playwright httpx pillow
-$PY_BIN -m playwright install chromium
+LOG="$INSTALL_DIR/.install_log.txt"
+: > "$LOG"
 
-# ── Install AE extension (both stable + Beta, admin fallback) ─
-echo ""
-echo " [4/4] Installing After Effects extension..."
-PANEL_SRC="$INSTALL_DIR/Lineup Panel.jsx"
-INSTALLED_AE=0
-NEEDS_ADMIN=0
-ADMIN_TARGETS=()
+banner() {
+    clear 2>/dev/null || printf '\033[2J\033[H'
+    echo ""
+    echo "  ${BOLD}${BLUE}⚽  Flashscore Ratings${RESET}"
+    echo "  ${DIM}Setting up on your Mac…${RESET}"
+    echo ""
+}
 
-AE_FOLDERS=()
-shopt -s nullglob 2>/dev/null || true
-for AE_DIR in "/Applications/Adobe After Effects "*; do
-    [ -d "$AE_DIR" ] && AE_FOLDERS+=("$AE_DIR")
+ok()   { printf "  ${GREEN}✓${RESET}  %s\n" "$1"; }
+bad()  { printf "  ${RED}✗${RESET}  %s\n" "$1"; }
+info() { printf "     ${DIM}%s${RESET}\n" "$1"; }
+
+spin() {
+    # spin <pid> <label>
+    local pid=$1 label="$2"
+    local frames='⣾⣽⣻⢿⡿⣟⣯⣷'
+    local i=0
+    printf '\033[?25l'  # hide cursor
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r  ${BLUE}${frames:$i:1}${RESET}  ${label}\033[K"
+        i=$(( (i + 1) % ${#frames} ))
+        sleep 0.08
+    done
+    printf '\033[?25h'  # show cursor
+    wait "$pid"
+    local rc=$?
+    printf "\r\033[K"
+    return $rc
+}
+
+step() {
+    # step "done label" -- command...
+    local label="$1"; shift
+    [ "$1" = "--" ] && shift
+    ( "$@" ) >>"$LOG" 2>&1 &
+    local pid=$!
+    if spin "$pid" "$label…"; then
+        ok "$label"
+        return 0
+    else
+        bad "$label failed"
+        return 1
+    fi
+}
+
+abort() {
+    echo ""
+    bad "$1"
+    echo ""
+    info "Full log: $LOG"
+    echo ""
+    read -p "  Press Enter to close…"
+    osascript -e 'tell application "Terminal" to close (every window whose tty contains "'$(tty | sed 's|/dev/||')'")' 2>/dev/null &
+    exit 1
+}
+
+# ── Start ───────────────────────────────────────────────────────
+banner
+
+# ── Pick the best python3 ───────────────────────────────────────
+# The stock /usr/bin/python3 (from Xcode CLT) ships Tcl/Tk 8.5 which
+# renders Tkinter labels/entries incorrectly on macOS. We need Python
+# with Tk 8.6+ — Homebrew's python@3.12 bundles it, python.org builds
+# bundle it. We try to find a "good" one and install Homebrew's if not.
+PY_BIN=""
+
+check_tk_ok() {
+    # Returns 0 if the given python has usable Tk (>= 8.6)
+    local py="$1"
+    [ -z "$py" ] && return 1
+    "$py" -c "import tkinter; r=tkinter.Tk(); v=r.tk.call('info','patchlevel'); r.destroy(); import sys; sys.exit(0 if v.split('.')[0]=='8' and int(v.split('.')[1])>=6 else 1)" 2>/dev/null
+}
+
+# Prefer Homebrew pythons over system python3
+for CANDIDATE in \
+    /opt/homebrew/bin/python3.12 \
+    /opt/homebrew/bin/python3 \
+    /usr/local/bin/python3.12 \
+    /usr/local/bin/python3 \
+    python3.12 python3
+do
+    if command -v "$CANDIDATE" >/dev/null 2>&1 && check_tk_ok "$CANDIDATE"; then
+        PY_BIN="$(command -v "$CANDIDATE")"
+        break
+    fi
 done
 
-if [ -f "$PANEL_SRC" ] && [ ${#AE_FOLDERS[@]} -gt 0 ]; then
-    for AE_DIR in "${AE_FOLDERS[@]}"; do
-        PANEL_DST="$AE_DIR/Scripts/ScriptUI Panels"
-        [ ! -d "$PANEL_DST" ] && mkdir -p "$PANEL_DST" 2>/dev/null
+if [ -z "$PY_BIN" ]; then
+    info "Installing Python (needed for a clean UI)…"
+    info "You may be asked for your Mac password."
+    echo ""
+    if ! command -v brew >/dev/null 2>&1; then
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" >>"$LOG" 2>&1
+        [ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
+        [ -x /usr/local/bin/brew ]    && eval "$(/usr/local/bin/brew shellenv)"
+    fi
+    step "Installing Python" -- brew install python@3.12 || abort "Couldn't install Python"
+    for CANDIDATE in /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12; do
+        if [ -x "$CANDIDATE" ] && check_tk_ok "$CANDIDATE"; then
+            PY_BIN="$CANDIDATE"
+            break
+        fi
+    done
+    [ -z "$PY_BIN" ] && abort "Installed Python but can't find a working one"
+else
+    ok "Python ready"
+fi
 
-        if cp "$PANEL_SRC" "$PANEL_DST/" 2>/dev/null; then
-            echo " [OK] Extension installed: $AE_DIR"
-            INSTALLED_AE=1
-        else
+# Pin the chosen Python for START_MAC.command so the app always uses the same one
+echo "$PY_BIN" > "$INSTALL_DIR/.python_path"
+
+# 2. Download files (one spinner, not 14)
+download_all() {
+    for REL in "${MAC_FILES[@]}"; do
+        local enc url out
+        enc=$(printf '%s' "$REL" | sed 's/ /%20/g')
+        url="${RAW_BASE}/${enc}"
+        out="$INSTALL_DIR/$REL"
+        curl -fsSL "$url" -o "$out" || return 1
+    done
+    chmod +x "$INSTALL_DIR"/*.command 2>/dev/null
+    return 0
+}
+step "Downloading the latest version" -- download_all \
+    || abort "Download failed — check your internet connection"
+
+# 3. Python packages (+ Chromium)
+install_deps() {
+    "$PY_BIN" -m pip install --quiet --break-system-packages playwright httpx pillow gdown 2>/dev/null \
+      || "$PY_BIN" -m pip install --quiet playwright httpx pillow gdown
+    "$PY_BIN" -m playwright install chromium
+}
+step "Preparing the tools (can take a minute)" -- install_deps \
+    || abort "Couldn't set up dependencies"
+
+# 4. AE template from Google Drive
+fetch_template() {
+    "$PY_BIN" -m gdown --folder "$GDRIVE_FOLDER_ID" -O "$INSTALL_DIR" --quiet
+}
+if step "Getting the After Effects template" -- fetch_template; then
+    :
+else
+    info "Skipped — you can download the template manually later."
+fi
+
+# 5. AE panel install (stable + Beta, admin fallback)
+install_ae_panel() {
+    local PANEL_SRC="$INSTALL_DIR/Lineup Panel.jsx"
+    [ ! -f "$PANEL_SRC" ] && return 0
+
+    local AE_FOLDERS=()
+    shopt -s nullglob 2>/dev/null || true
+    for AE_DIR in "/Applications/Adobe After Effects "*; do
+        [ -d "$AE_DIR" ] && AE_FOLDERS+=("$AE_DIR")
+    done
+    [ ${#AE_FOLDERS[@]} -eq 0 ] && return 0
+
+    local NEEDS_ADMIN=0
+    local ADMIN_TARGETS=()
+    for AE_DIR in "${AE_FOLDERS[@]}"; do
+        local PANEL_DST="$AE_DIR/Scripts/ScriptUI Panels"
+        [ ! -d "$PANEL_DST" ] && mkdir -p "$PANEL_DST" 2>/dev/null
+        if ! cp "$PANEL_SRC" "$PANEL_DST/" 2>/dev/null; then
             NEEDS_ADMIN=1
             ADMIN_TARGETS+=("$PANEL_DST")
         fi
     done
 
-    # One admin prompt that covers all folders needing elevation
     if [ $NEEDS_ADMIN -eq 1 ]; then
-        echo ""
-        echo " [INFO] Admin password required to install panel into AE."
-        CP_CMDS=""
+        local CP_CMDS=""
         for DST in "${ADMIN_TARGETS[@]}"; do
             CP_CMDS="$CP_CMDS cp \"$PANEL_SRC\" \"$DST/\" ; "
         done
-        if osascript -e "do shell script \"$CP_CMDS\" with administrator privileges" >/dev/null 2>&1; then
-            for DST in "${ADMIN_TARGETS[@]}"; do
-                if [ -f "$DST/Lineup Panel.jsx" ]; then
-                    echo " [OK] Extension installed (admin): $DST"
-                    INSTALLED_AE=1
-                else
-                    echo " [WARNING] Copy failed: $DST"
-                fi
-            done
-        else
-            echo " [WARNING] Admin copy was cancelled or failed."
-            echo "           Run manually in Terminal:"
-            for DST in "${ADMIN_TARGETS[@]}"; do
-                echo "             sudo cp \"$PANEL_SRC\" \"$DST/\""
-            done
-        fi
+        osascript -e "do shell script \"$CP_CMDS\" with administrator privileges" 2>/dev/null
     fi
-elif [ ! -f "$PANEL_SRC" ]; then
-    echo " [INFO] Lineup Panel.jsx not found, skipping AE extension."
-else
-    echo " [INFO] After Effects not found in /Applications."
-    echo "        Copy \"Lineup Panel.jsx\" manually to:"
-    echo "        /Applications/Adobe After Effects <version>/Scripts/ScriptUI Panels/"
+    return 0
+}
+
+# Run AE install inline (may show admin dialog — don't hide under spinner)
+PANEL_SRC="$INSTALL_DIR/Lineup Panel.jsx"
+AE_COUNT=0
+shopt -s nullglob 2>/dev/null || true
+for AE_DIR in "/Applications/Adobe After Effects "*; do
+    [ -d "$AE_DIR" ] && AE_COUNT=$((AE_COUNT+1))
+done
+
+if [ -f "$PANEL_SRC" ] && [ $AE_COUNT -gt 0 ]; then
+    printf "  ${BLUE}⣾${RESET}  Installing the After Effects panel…\033[K\r"
+    if install_ae_panel; then
+        printf "\r\033[K"
+        ok "After Effects panel installed"
+    else
+        printf "\r\033[K"
+        info "AE panel install skipped — copy Lineup Panel.jsx manually if needed."
+    fi
 fi
 
-# ── Done ─────────────────────────────────────────────────────
+# ── Done ────────────────────────────────────────────────────────
 echo ""
-echo " ============================================================"
-echo "   DONE! Everything is installed."
+echo "  ${GREEN}${BOLD}🎉  All set!${RESET}"
 echo ""
-echo "   To get started:"
-echo "     1. Open After Effects and load the .aep template"
-echo "     2. Double-click START_MAC.command to launch the app"
+echo "  ${DIM}What's next:${RESET}"
+echo "    1. Open After Effects and load the template"
+echo "    2. Double-click ${BOLD}START_MAC.command${RESET} to launch the app"
 echo ""
-echo "   For help, reach out to Marian Grosu."
-echo " ============================================================"
-echo ""
-read -p "Press Enter to close..."
+read -p "  Press Enter to close…"
 
-# Auto-close the Terminal window (macOS Terminal.app + iTerm2 best-effort)
+# Auto-close the Terminal window
 osascript -e 'tell application "Terminal" to close (every window whose tty contains "'$(tty | sed 's|/dev/||')'")' 2>/dev/null &
 osascript -e 'tell application "iTerm" to close current window' 2>/dev/null &
 exit 0

@@ -44,15 +44,22 @@ bad()  { printf "  ${RED}✗${RESET}  %s\n" "$1"; }
 info() { printf "     ${DIM}%s${RESET}\n" "$1"; }
 
 spin() {
-    # spin <pid> <label>
+    # Football ⚽ bouncing left–right while <pid> runs
     local pid=$1 label="$2"
-    local frames='⣾⣽⣻⢿⡿⣟⣯⣷'
-    local i=0
+    local width=22
+    local pos=0
+    local dir=1
     printf '\033[?25l'  # hide cursor
     while kill -0 "$pid" 2>/dev/null; do
-        printf "\r  ${BLUE}${frames:$i:1}${RESET}  ${label}\033[K"
-        i=$(( (i + 1) % ${#frames} ))
-        sleep 0.08
+        # left padding of `pos` spaces, then ⚽, then right padding
+        local left right
+        left=$(printf '%*s' "$pos" "")
+        right=$(printf '%*s' "$((width - pos))" "")
+        printf "\r  [%s⚽%s]  ${DIM}%s${RESET}\033[K" "$left" "$right" "$label"
+        pos=$((pos + dir))
+        if [ $pos -ge $width ]; then dir=-1; fi
+        if [ $pos -le 0 ];     then dir=1;  fi
+        sleep 0.05
     done
     printf '\033[?25h'  # show cursor
     wait "$pid"
@@ -119,24 +126,21 @@ do
 done
 
 if [ -z "$PY_BIN" ]; then
-    info "Setting up Python (one-time setup for a clean UI)"
-    info "This can take 3–10 minutes. Enter your Mac password when asked."
+    info "First-time setup needs Python. Takes about 3–10 minutes."
+    info "You'll be asked to press RETURN and to type your Mac password."
     echo ""
-    echo "  ${DIM}─────── Setup output ───────${RESET}"
     if ! command -v brew >/dev/null 2>&1; then
-        # Show output so user sees progress and password prompt
-        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        # Interactive install — Homebrew needs to prompt for sudo password
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         [ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
         [ -x /usr/local/bin/brew ]    && eval "$(/usr/local/bin/brew shellenv)"
     fi
     if ! command -v brew >/dev/null 2>&1; then
-        abort "Homebrew install didn't complete"
+        abort "Homebrew install didn't complete. Re-run when you're ready."
     fi
     echo ""
-    echo "  ${DIM}Installing Python 3.12 (this is the big one, please wait)…${RESET}"
-    echo ""
-    brew install python@3.12 2>&1 | tail -30
-    echo "  ${DIM}────────────────────────────${RESET}"
+    echo "  ${DIM}Installing Python 3.12…${RESET}"
+    brew install python@3.12
     echo ""
 
     for CANDIDATE in /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12; do
@@ -146,6 +150,8 @@ if [ -z "$PY_BIN" ]; then
         fi
     done
     [ -z "$PY_BIN" ] && abort "Python installed but can't find a working one"
+    clear 2>/dev/null || printf '\033[2J\033[H'
+    banner
     ok "Python installed"
 else
     ok "Python ready"

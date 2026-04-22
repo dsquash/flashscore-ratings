@@ -26,8 +26,8 @@ BRANCH       = "main"
 
 RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{BRANCH}"
 
-# Files downloaded from GitHub on every update
-UPDATABLE_FILES = [
+# Files common to all platforms
+_COMMON_FILES = [
     "launcher.py",
     "run.py",
     "refresh_stats.py",
@@ -37,9 +37,28 @@ UPDATABLE_FILES = [
     "refresh_comps.jsx",
     "save_template_state.jsx",
     "Lineup Panel.jsx",
-    "START HERE.bat",
+    "sofifa_overrides.json",
     "version.txt",
 ]
+
+# Platform-specific installer/launcher scripts
+_WINDOWS_FILES = [
+    "INSTALL.bat",
+    "START HERE.bat",
+]
+
+_MAC_FILES = [
+    "INSTALL_MAC.command",
+    "START_MAC.command",
+]
+
+# Pick the set for the OS running the updater — Mac never pulls .bat, Windows never pulls .command
+if sys.platform.startswith("win"):
+    UPDATABLE_FILES = _COMMON_FILES + _WINDOWS_FILES
+elif sys.platform == "darwin":
+    UPDATABLE_FILES = _COMMON_FILES + _MAC_FILES
+else:
+    UPDATABLE_FILES = list(_COMMON_FILES)
 
 AE_PANEL_FILE = "Lineup Panel.jsx"
 

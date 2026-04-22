@@ -44,26 +44,88 @@ FG_DIM    = "#7a8099"
 RED       = "#e74c3c"
 YELLOW    = "#f1c40f"
 
-# ── macOS Aqua fix ────────────────────────────────────────────────
-# On macOS, tk.Button ignores bg/fg (native Aqua renderer). Patch the
-# widget classes so every Button/Radiobutton auto-sets highlightbackground
-# to the window BG — this removes the default gray halo and lets the
-# dark theme blend in. Colors on the button face itself still fall back
-# to native (Mac limitation), but the UI looks far less broken.
+# ── macOS Tk shim ─────────────────────────────────────────────────
+# The stock Python 3 on macOS (/usr/bin/python3) ships Tcl/Tk 8.5 which
+# renders tk.Label and tk.Entry incorrectly with custom bg/fg (text ends
+# up invisible). Workaround: redirect those two widgets through ttk with
+# the 'clam' theme, which honours bg/fg on every platform and Tk version.
+# We also patch tk.Button/Radiobutton so the Aqua halo matches the dark
+# theme.
 if sys.platform == "darwin":
-    _OrigButton = tk.Button
-    _OrigRadiobutton = tk.Radiobutton
+    _style_cache = {}
 
-    class _MacButton(_OrigButton):
+    def _mac_style(kind, bg, fg, font):
+        """Create/return a ttk style that matches the requested colors."""
+        key = (kind, bg, fg, str(font))
+        if key in _style_cache:
+            return _style_cache[key]
+        s = ttk.Style()
+        try:
+            s.theme_use("clam")
+        except Exception:
+            pass
+        name = f"FS{len(_style_cache)}.T{kind}"
+        opts = {}
+        if bg is not None:
+            opts["background"] = bg
+            if kind == "Entry":
+                opts["fieldbackground"] = bg
+        if fg is not None:
+            opts["foreground"] = fg
+        if font is not None:
+            opts["font"] = font
+        s.configure(name, **opts)
+        _style_cache[key] = name
+        return name
+
+    _LABEL_DROP = (
+        "relief", "activeforeground", "activebackground",
+        "highlightbackground", "highlightthickness", "highlightcolor",
+        "insertbackground", "selectcolor", "bd", "borderwidth",
+        "selectforeground", "selectbackground",
+    )
+    _ENTRY_DROP = (
+        "relief", "highlightbackground", "highlightthickness",
+        "highlightcolor", "insertbackground", "bd", "borderwidth",
+        "selectcolor", "disabledbackground", "readonlybackground",
+    )
+
+    class _MacLabel(ttk.Label):
+        def __init__(self, master=None, **kw):
+            bg = kw.pop("bg", None) or kw.pop("background", None)
+            fg = kw.pop("fg", None) or kw.pop("foreground", None)
+            font = kw.pop("font", None)
+            padx = kw.pop("padx", None)
+            pady = kw.pop("pady", None)
+            for k in _LABEL_DROP:
+                kw.pop(k, None)
+            if padx is not None or pady is not None:
+                kw["padding"] = (padx or 0, pady or 0, padx or 0, pady or 0)
+            kw["style"] = _mac_style("Label", bg, fg, font)
+            super().__init__(master, **kw)
+
+    class _MacEntry(ttk.Entry):
+        def __init__(self, master=None, **kw):
+            bg = kw.pop("bg", None) or kw.pop("background", None)
+            fg = kw.pop("fg", None) or kw.pop("foreground", None)
+            font = kw.pop("font", None)
+            for k in _ENTRY_DROP:
+                kw.pop(k, None)
+            kw["style"] = _mac_style("Entry", bg, fg, font)
+            super().__init__(master, **kw)
+
+    class _MacButton(tk.Button):
         def __init__(self, master=None, **kw):
             kw.setdefault("highlightbackground", BG)
             super().__init__(master, **kw)
 
-    class _MacRadiobutton(_OrigRadiobutton):
+    class _MacRadiobutton(tk.Radiobutton):
         def __init__(self, master=None, **kw):
             kw.setdefault("highlightbackground", BG)
             super().__init__(master, **kw)
 
+    tk.Label = _MacLabel
+    tk.Entry = _MacEntry
     tk.Button = _MacButton
     tk.Radiobutton = _MacRadiobutton
 

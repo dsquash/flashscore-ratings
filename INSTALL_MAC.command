@@ -1,5 +1,5 @@
 #!/bin/bash
-# Flashscore Ratings — macOS installer (clean UX)
+# Flashscore Ratings — macOS installer (stock Python, no Homebrew)
 
 set -u
 
@@ -51,7 +51,6 @@ spin() {
     local dir=1
     printf '\033[?25l'  # hide cursor
     while kill -0 "$pid" 2>/dev/null; do
-        # left padding of `pos` spaces, then ⚽, then right padding
         local left right
         left=$(printf '%*s' "$pos" "")
         right=$(printf '%*s' "$((width - pos))" "")
@@ -69,7 +68,6 @@ spin() {
 }
 
 step() {
-    # step "done label" -- command...
     local label="$1"; shift
     [ "$1" = "--" ] && shift
     ( "$@" ) >>"$LOG" 2>&1 &
@@ -97,70 +95,27 @@ abort() {
 # ── Start ───────────────────────────────────────────────────────
 banner
 
-# ── Pick the best python3 ───────────────────────────────────────
-# The stock /usr/bin/python3 (from Xcode CLT) ships Tcl/Tk 8.5 which
-# renders Tkinter labels/entries incorrectly on macOS. We need Python
-# with Tk 8.6+ — Homebrew's python@3.12 bundles it, python.org builds
-# bundle it. We try to find a "good" one and install Homebrew's if not.
-PY_BIN=""
+# ── Use stock macOS Python ──────────────────────────────────────
+PY_BIN="/usr/bin/python3"
 
-check_tk_ok() {
-    # Returns 0 if the given python has usable Tk (>= 8.6)
-    local py="$1"
-    [ -z "$py" ] && return 1
-    "$py" -c "import tkinter; r=tkinter.Tk(); v=r.tk.call('info','patchlevel'); r.destroy(); import sys; sys.exit(0 if v.split('.')[0]=='8' and int(v.split('.')[1])>=6 else 1)" 2>/dev/null
-}
-
-# Prefer Homebrew pythons over system python3
-for CANDIDATE in \
-    /opt/homebrew/bin/python3.12 \
-    /opt/homebrew/bin/python3 \
-    /usr/local/bin/python3.12 \
-    /usr/local/bin/python3 \
-    python3.12 python3
-do
-    if command -v "$CANDIDATE" >/dev/null 2>&1 && check_tk_ok "$CANDIDATE"; then
-        PY_BIN="$(command -v "$CANDIDATE")"
-        break
-    fi
-done
-
-if [ -z "$PY_BIN" ]; then
-    info "First-time setup needs Python. Takes about 3–10 minutes."
-    info "You'll be asked to press RETURN and to type your Mac password."
+if [ ! -x "$PY_BIN" ]; then
+    info "macOS needs to install the Command Line Tools first."
+    info "A system dialog will pop up — click Install and wait."
     echo ""
-    if ! command -v brew >/dev/null 2>&1; then
-        # Interactive install — Homebrew needs to prompt for sudo password
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        [ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
-        [ -x /usr/local/bin/brew ]    && eval "$(/usr/local/bin/brew shellenv)"
-    fi
-    if ! command -v brew >/dev/null 2>&1; then
-        abort "Homebrew install didn't complete. Re-run when you're ready."
-    fi
-    echo ""
-    echo "  ${DIM}Installing Python 3.12…${RESET}"
-    brew install python@3.12
-    echo ""
-
-    for CANDIDATE in /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12; do
-        if [ -x "$CANDIDATE" ] && check_tk_ok "$CANDIDATE"; then
-            PY_BIN="$CANDIDATE"
-            break
-        fi
-    done
-    [ -z "$PY_BIN" ] && abort "Python installed but can't find a working one"
-    clear 2>/dev/null || printf '\033[2J\033[H'
-    banner
-    ok "Python installed"
-else
-    ok "Python ready"
+    xcode-select --install 2>/dev/null
+    abort "Please run this installer again after Command Line Tools finish installing."
 fi
 
-# Pin the chosen Python for START_MAC.command so the app always uses the same one
-echo "$PY_BIN" > "$INSTALL_DIR/.python_path"
+# Trigger CLT prompt if python3 exists but is a stub
+if ! "$PY_BIN" -c "import sys" >/dev/null 2>&1; then
+    info "macOS needs to finish setting up developer tools."
+    xcode-select --install 2>/dev/null
+    abort "Please run this installer again after Command Line Tools finish installing."
+fi
 
-# 2. Download files (one spinner, not 14)
+ok "Python ready"
+
+# 2. Download files
 download_all() {
     for REL in "${MAC_FILES[@]}"; do
         local enc url out
@@ -175,10 +130,10 @@ download_all() {
 step "Downloading the latest version" -- download_all \
     || abort "Download failed — check your internet connection"
 
-# 3. Python packages (+ Chromium)
+# 3. Python packages (+ Chromium) — user-level install, no sudo
 install_deps() {
-    "$PY_BIN" -m pip install --quiet --break-system-packages playwright httpx pillow gdown 2>/dev/null \
-      || "$PY_BIN" -m pip install --quiet playwright httpx pillow gdown
+    "$PY_BIN" -m pip install --quiet --user --break-system-packages playwright httpx pillow gdown 2>/dev/null \
+      || "$PY_BIN" -m pip install --quiet --user playwright httpx pillow gdown
     "$PY_BIN" -m playwright install chromium
 }
 step "Preparing the tools (can take a minute)" -- install_deps \
@@ -227,7 +182,6 @@ install_ae_panel() {
     return 0
 }
 
-# Run AE install inline (may show admin dialog — don't hide under spinner)
 PANEL_SRC="$INSTALL_DIR/Lineup Panel.jsx"
 AE_COUNT=0
 shopt -s nullglob 2>/dev/null || true
@@ -256,7 +210,6 @@ echo "    2. Double-click ${BOLD}START_MAC.command${RESET} to launch the app"
 echo ""
 read -p "  Press Enter to close…"
 
-# Auto-close the Terminal window
 osascript -e 'tell application "Terminal" to close (every window whose tty contains "'$(tty | sed 's|/dev/||')'")' 2>/dev/null &
 osascript -e 'tell application "iTerm" to close current window' 2>/dev/null &
 exit 0

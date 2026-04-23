@@ -1,18 +1,20 @@
 #!/bin/bash
-# Flashscore Ratings - macOS launcher
+# Flashscore Ratings — macOS launcher
+# Double-click this to open the app.
+
 set -u
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$APP_DIR" || exit 1
+SCRIPTS_DIR="$APP_DIR/_DO NOT TOUCH_"
 
 export PYTHONIOENCODING="utf-8"
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 
-# Use the Python pinned by INSTALL_MAC.command (has Tk 8.6 for proper UI).
+# Read pinned Python path set by INSTALL_MAC.command
 PY_BIN=""
-if [ -f "$APP_DIR/.python_path" ]; then
-    PY_BIN="$(cat "$APP_DIR/.python_path")"
+if [ -f "$SCRIPTS_DIR/.python_path" ]; then
+    PY_BIN="$(cat "$SCRIPTS_DIR/.python_path")"
     [ ! -x "$PY_BIN" ] && PY_BIN=""
 fi
 
@@ -34,10 +36,13 @@ if [ -z "$PY_BIN" ]; then
 fi
 
 if [ -z "$PY_BIN" ]; then
-    echo "Python not found. Run INSTALL_MAC.command first."
-    read -r -p "Press Enter to close..."
+    osascript -e 'display alert "Python not found" message "Please run INSTALL_MAC.command first." as warning'
     exit 1
 fi
 
-# Launch the app silently (GUI takes over)
-exec "$PY_BIN" "$APP_DIR/launcher.py"
+if [ ! -f "$SCRIPTS_DIR/launcher.py" ]; then
+    osascript -e 'display alert "App files not found" message "Please run INSTALL_MAC.command first." as warning'
+    exit 1
+fi
+
+exec "$PY_BIN" "$SCRIPTS_DIR/launcher.py"

@@ -15,8 +15,18 @@ import sys
 import shutil
 from pathlib import Path
 
-BASE_DIR     = Path(__file__).parent
+BASE_DIR     = Path(__file__).parent        # _DO NOT TOUCH_/
+ROOT_DIR     = BASE_DIR.parent              # app root (where .command / .bat files live)
 VERSION_FILE = BASE_DIR / "version.txt"
+
+# Files that live at ROOT_DIR level (not inside _DO NOT TOUCH_/)
+_ROOT_ONLY_FILES = {
+    "INSTALL_MAC.command", "START_MAC.command", "RUN_TERMINAL.command",
+    "INSTALL.bat", "START HERE.bat",
+}
+
+# sofifa_overrides.json is user data — never overwrite if it already exists
+_PRESERVE_IF_EXISTS = {"sofifa_overrides.json"}
 
 # ── GitHub config ─────────────────────────────────────────────────
 GITHUB_OWNER = "dsquash"
@@ -188,8 +198,17 @@ def apply_update(progress_cb=None) -> tuple:
 
     for i, filename in enumerate(UPDATABLE_FILES):
         url  = f"{RAW_BASE}/{filename}"
-        dest = BASE_DIR / filename
+        # .command / .bat files go to ROOT_DIR; everything else to BASE_DIR
+        dest = ROOT_DIR / filename if filename in _ROOT_ONLY_FILES else BASE_DIR / filename
         ok   = False
+
+        # Never overwrite user data files that already exist
+        if filename in _PRESERVE_IF_EXISTS and dest.exists():
+            updated.append(filename)
+            if progress_cb:
+                progress_cb(i + 1, total, f"{filename} (preserved)", True)
+            continue
+
         try:
             data = _fetch_url(url, timeout=30)
             dest.write_bytes(data)

@@ -3,7 +3,8 @@
  *
  * INSTALARE (panel docabil, non-blocant):
  *   Copiaza acest fisier in:
- *   C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Scripts\ScriptUI Panels\
+ *   Mac:     /Applications/Adobe After Effects .../Scripts/ScriptUI Panels/
+ *   Windows: C:\Program Files\Adobe\Adobe After Effects ...\Support Files\Scripts\ScriptUI Panels\
  *   Reporneste AE → apare in Window menu
  *
  * ALTERNATIV (fereastra flotanta):
@@ -19,12 +20,39 @@
     var AME_PRESET_NAME = "Ratings Video";
     // ─────────────────────────────────────────────────────────────
 
-    var DEFAULT_DIR = "C:\\Users\\marug\\Desktop\\Task #1 - FlashScore folder";
+    var DEFAULT_DIR = "C:\\Users\\marug\\Desktop\\Task #1 - FlashScore folder\\_DO NOT TOUCH_";
 
     // ── Detecteaza folderul scripturilor ──────────────────────────
+    // Priority: 1) config file written by INSTALL_MAC.command (Mac)
+    //           2) same folder as this JSX (when run as Script File)
+    //           3) hardcoded Windows fallback
     var dir = "";
-    try { dir = new File($.fileName).parent.fsName; } catch(e) {}
-    dir = (dir || "").replace(/\\/g, "/").replace(/\/$/, "");
+
+    // 1. Config file: ~/.flashscore_ratings (written by INSTALL_MAC.command)
+    try {
+        var _home = $.getenv("HOME") || $.getenv("USERPROFILE") || "";
+        if (_home) {
+            var _cfg = new File(_home + "/.flashscore_ratings");
+            if (_cfg.exists) {
+                _cfg.open("r");
+                var _cfgDir = _cfg.read().replace(/[\r\n]/g, "").replace(/\\/g, "/").replace(/\/$/, "");
+                _cfg.close();
+                if (_cfgDir && (new File(_cfgDir + "/populate_lineup.jsx")).exists) {
+                    dir = _cfgDir;
+                }
+            }
+        }
+    } catch(e) {}
+
+    // 2. Same folder as this JSX (works via File > Scripts > Run Script File)
+    if (!dir) {
+        try {
+            var _p = new File($.fileName).parent.fsName.replace(/\\/g, "/").replace(/\/$/, "");
+            if (new File(_p + "/populate_lineup.jsx").exists) { dir = _p; }
+        } catch(e) {}
+    }
+
+    // 3. Hardcoded Windows fallback
     if (!dir || !(new File(dir + "/populate_lineup.jsx")).exists) {
         dir = DEFAULT_DIR.replace(/\\/g, "/");
     }
@@ -168,7 +196,15 @@
                     var _f2 = new File(Folder.userData.fsName + "/Adobe/Common/AMEPresets/" + _pname);
                     if (_f2.exists) { presetPath = _f2.fsName; }
                 }
-                // 3. Cauta recursiv in AMEPresets (subdirectoare — preset-uri organizate pe foldere)
+                // 3. Mac: ~/Library/Application Support/Adobe/Common/AMEPresets
+                if (!presetPath) {
+                    var _home2 = $.getenv("HOME") || "";
+                    if (_home2) {
+                        var _f3 = new File(_home2 + "/Library/Application Support/Adobe/Common/AMEPresets/" + _pname);
+                        if (_f3.exists) { presetPath = _f3.fsName; }
+                    }
+                }
+                // 4. Cauta recursiv in AMEPresets (subdirectoare)
                 if (!presetPath) {
                     var _ameRoot = new Folder(Folder.userData.fsName + "/Adobe/Common/AMEPresets");
                     presetPath = _findEprRecursive(_ameRoot, _pname);
@@ -192,16 +228,14 @@
         try { panel.layout.layout(true); } catch(e) {}
     }
 
-    // ── onClick: Run script ───────────────────────────────────
     // ── Helper: scrie MATCH_TYPE in run.py ───────────────────
     function setMatchType(matchType) {
         var runPy = new File(dir + "/run.py");
-        if (!runPy.exists) return; // run.py optional
+        if (!runPy.exists) return;
         try {
             runPy.open("r");
             var content = runPy.read();
             runPy.close();
-            // Inlocuieste linia MATCH_TYPE = "..." cu valoarea selectata
             var updated = content.replace(
                 /^MATCH_TYPE\s*=\s*["'][^"']*["']/m,
                 'MATCH_TYPE = "' + matchType + '"'
@@ -214,6 +248,7 @@
         } catch(e) {}
     }
 
+    // ── onClick: Run script ───────────────────────────────────
     btnRun.onClick = function() {
         var scriptName = "";
         var label      = "";
@@ -222,8 +257,6 @@
         else if (rb3.value) { scriptName = "save_template_state.jsx"; label = "SAVE STATE"; }
 
         if (!scriptName) return;
-
-        // (MATCH_TYPE e setat din launcher, nu din AE)
 
         var fScript = new File(dir + "/" + scriptName);
         if (!fScript.exists) {
@@ -251,9 +284,9 @@
 
     // ── onClick: Refresh Stats ─────────────────────────────────
     btnRefreshStats.onClick = function() {
-        var scriptPath    = dir + "/refresh_stats.py";
-        var refreshJsx    = dir + "/refresh_comps.jsx";
-        var summaryPath   = dir + "/flashscore_output/last_refresh_summary.txt";
+        var scriptPath  = dir + "/refresh_stats.py";
+        var refreshJsx  = dir + "/refresh_comps.jsx";
+        var summaryPath = dir + "/flashscore_output/last_refresh_summary.txt";
 
         if (!(new File(scriptPath)).exists) {
             alert("refresh_stats.py was not found in:\n" + dir);
@@ -264,8 +297,26 @@
         statusTxt.text = "Refreshing stats from Flashscore...";
         try { panel.layout.layout(true); } catch(e) {}
 
-        var winPath = scriptPath.replace(/\//g, "\\");
-        system.callSystem('cmd /c python "' + winPath + '" >nul 2>&1');
+        // Detect Python interpreter from .python_path (written by INSTALL_MAC.command)
+        var pyBin = "python3";
+        var pyFile = new File(dir + "/.python_path");
+        if (pyFile.exists) {
+            pyFile.open("r");
+            pyBin = pyFile.read().replace(/[\r\n]/g, "");
+            pyFile.close();
+        }
+
+        // Platform-aware execution
+        var isMac = ($.os.toLowerCase().indexOf("mac") >= 0);
+        if (isMac) {
+            // On Mac: use full Python path, quote script path for shell
+            var macCmd = '"' + pyBin + '" "' + scriptPath + '"';
+            system.callSystem(macCmd);
+        } else {
+            // On Windows: use cmd
+            var winPath = scriptPath.replace(/\//g, "\\");
+            system.callSystem('cmd /c python "' + winPath + '" >nul 2>&1');
+        }
 
         // ── Step 2: read and show summary ─────────────────────────
         var sf = new File(summaryPath);

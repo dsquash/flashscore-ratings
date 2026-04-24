@@ -173,16 +173,16 @@ echo "$PY_BIN" > "$SCRIPTS_DIR/.python_path"
 # STEP 2 — pip packages
 # ══════════════════════════════════════════════════════════════════
 check_packages() {
-    "$PY_BIN" -c "import playwright, httpx, PIL, gdown" 2>/dev/null
+    "$PY_BIN" -c "import playwright, httpx, PIL, gdown, ttkbootstrap" 2>/dev/null
 }
 
 if check_packages; then
-    skip "Python packages (playwright, httpx, pillow, gdown)"
+    skip "Python packages (playwright, httpx, pillow, gdown, ttkbootstrap)"
 else
     install_packages() {
         "$PY_BIN" -m pip install --quiet --upgrade pip 2>/dev/null || true
-        "$PY_BIN" -m pip install --quiet playwright httpx pillow gdown \
-            || "$PY_BIN" -m pip install --quiet --user playwright httpx pillow gdown
+        "$PY_BIN" -m pip install --quiet playwright httpx pillow gdown ttkbootstrap \
+            || "$PY_BIN" -m pip install --quiet --user playwright httpx pillow gdown ttkbootstrap
     }
     run_step "Installing Python packages" install_packages \
         || abort "Couldn't install Python packages. Check $LOG for details."

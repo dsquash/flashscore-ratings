@@ -109,7 +109,7 @@ if errorlevel 1 (
 :: ── Install Python packages + Chromium ───────────────────────
 echo.
 echo  Installing Python packages...
-python -m pip install playwright httpx pillow --quiet
+python -m pip install playwright httpx pillow gdown ttkbootstrap --quiet
 python -m playwright install chromium
 
 :: ── Install AE extension ──────────────────────────────────────

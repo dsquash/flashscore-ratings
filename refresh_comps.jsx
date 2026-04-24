@@ -1,3 +1,28 @@
+// ── JSON polyfill for ExtendScript (AE on macOS has no native JSON) ──
+if (typeof JSON === "undefined") { JSON = {}; }
+if (typeof JSON.parse !== "function") {
+    JSON.parse = function (text) { return eval("(" + String(text) + ")"); };
+}
+if (typeof JSON.stringify !== "function") {
+    JSON.stringify = function (o) {
+        var t = typeof o;
+        if (o === null || t === "undefined") return "null";
+        if (t === "number" || t === "boolean") return String(o);
+        if (t === "string") return '"' + o.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t") + '"';
+        if (o instanceof Array) {
+            var a = [];
+            for (var i = 0; i < o.length; i++) a.push(JSON.stringify(o[i]));
+            return "[" + a.join(",") + "]";
+        }
+        if (t === "object") {
+            var b = [];
+            for (var k in o) if (o.hasOwnProperty(k)) b.push(JSON.stringify(k) + ":" + JSON.stringify(o[k]));
+            return "{" + b.join(",") + "}";
+        }
+        return "null";
+    };
+}
+
 /**
  * refresh_comps.jsx — Update AE compositions with latest stats from data.json
  * ============================================================================
@@ -87,13 +112,15 @@
     if (match.away_avg_rating)
         setRatingSlider(AWAY_RATING_COMP, AWAY_RATING_LAYER, parseFloat(match.away_avg_rating));
 
-    // ── 4. Update player stats ────────────────────────────────────
+    // ── 4. Update player stats (selective — only if changed) ──────
     var groups = [
         { list: data.home.players,      prefix: "home_player_", isSub: false },
         { list: data.home.substitutes,  prefix: "home_sub_",    isSub: true  },
         { list: data.away.players,      prefix: "away_player_", isSub: false },
         { list: data.away.substitutes,  prefix: "away_sub_",    isSub: true  }
     ];
+
+    var unchanged = 0;
 
     for (var g = 0; g < groups.length; g++) {
         var grp = groups[g];
@@ -105,7 +132,15 @@
             var statsComp = findCompByName(statsCompName);
             if (!statsComp) { skipped++; continue; }
 
-            refreshPlayerStats(statsComp, player, grp.isSub);
+            var ctrl = findLayerIn(statsComp, CTRL_LAYER);
+            if (!ctrl) { skipped++; continue; }
+
+            if (!playerNeedsUpdate(ctrl, player, grp.isSub)) {
+                unchanged++;
+                continue;
+            }
+
+            refreshPlayerStats(ctrl, player, grp.isSub);
             updated++;
         }
     }
@@ -116,17 +151,72 @@
     msg += "\u2022 Score: " + scoreStr + "\n";
     msg += "\u2022 Avg: " + (match.home_avg_rating || "?") + " / " + (match.away_avg_rating || "?") + "\n";
     msg += "\u2022 Player stats updated: " + updated + "\n";
+    if (unchanged > 0)
+        msg += "\u2022 Unchanged (skipped): " + unchanged + "\n";
     if (skipped > 0)
-        msg += "\u2022 Skipped (comp not found): " + skipped + "\n";
+        msg += "\u2022 Comp not found: " + skipped + "\n";
     msg += "\nNo re-populate needed \u2014 positions unchanged.";
     alert(msg);
 
     // ── Helpers ───────────────────────────────────────────────────
 
-    function refreshPlayerStats(statsComp, player, isSub) {
-        var ctrl = findLayerIn(statsComp, CTRL_LAYER);
-        if (!ctrl) return;
+    /**
+     * Compara valorile curente din AE cu cele din data.json.
+     * Returneaza true daca cel putin o valoare s-a schimbat.
+     */
+    function playerNeedsUpdate(ctrl, player, isSub) {
+        try {
+            var ev      = player.events || [];
+            var rating  = parseFloat(player.rating) || 0;
+            var nGoals  = cnt(ev, "goal");
+            var expGoal   = has(ev, "goal")         ? 1 : 0;
+            var expYellow = has(ev, "yellow_card")   ? 1 : 0;
+            var expRed    = has(ev, "red_card")      ? 1 : 0;
+            var expStar   = has(ev, "star")          ? 1 : 0;
+            var expChange = isSub ? 1 : (has(ev, "substituted_out") ? 1 : 0);
+            var expMG     = nGoals >= 2 ? 1 : 0;
 
+            var curNote = 0;
+            try { curNote = ctrl.effect(FX.note).property(1).value; } catch(e) { return true; }
+            if (Math.abs(curNote - rating) > 0.005) return true;
+
+            var curGoal = 0;
+            try { curGoal = ctrl.effect(FX.goal).property(1).value; } catch(e) { return true; }
+            if (curGoal !== expGoal) return true;
+
+            var curYellow = 0;
+            try { curYellow = ctrl.effect(FX.yellowCard).property(1).value; } catch(e) { return true; }
+            if (curYellow !== expYellow) return true;
+
+            var curRed = 0;
+            try { curRed = ctrl.effect(FX.redCard).property(1).value; } catch(e) { return true; }
+            if (curRed !== expRed) return true;
+
+            var curStar = 0;
+            try { curStar = ctrl.effect(FX.star).property(1).value; } catch(e) { return true; }
+            if (curStar !== expStar) return true;
+
+            var curChange = 0;
+            try { curChange = ctrl.effect(FX.change).property(1).value; } catch(e) { return true; }
+            if (curChange !== expChange) return true;
+
+            var curMG = 0;
+            try {
+                try { curMG = ctrl.effect("Multiple Goals").property("Checkbox").value; }
+                catch(e) { curMG = ctrl.effect("Multiple Goals").property(1).value; }
+            } catch(e) { return true; }
+            if (curMG !== expMG) return true;
+
+            return false;
+        } catch(e) {
+            return true; // la orice eroare de citire → actualizeaza safe
+        }
+    }
+
+    /**
+     * Scrie efectele pe ctrl layer. ctrl este primit direct (deja gasit).
+     */
+    function refreshPlayerStats(ctrl, player, isSub) {
         var ev     = player.events || [];
         var rating = parseFloat(player.rating) || 0;
         var nGoals = cnt(ev, "goal");

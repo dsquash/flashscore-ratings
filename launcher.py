@@ -2,7 +2,11 @@
 """
 launcher.py — Flashscore Ratings UI
 =====================================
-Double-click launcher.py  or:  python launcher.py
+Double-click launcher.py  or:  python3 launcher.py
+
+Platform-aware UI:
+  - macOS: native Aqua (ttk) widgets, clean light theme
+  - Windows / Linux: custom dark theme with tk widgets
 """
 
 import tkinter as tk
@@ -19,142 +23,63 @@ LAST_URL  = BASE_DIR / "flashscore_output" / "last_url.txt"
 RUN_PY    = BASE_DIR / "run.py"
 OVERRIDES = BASE_DIR / "sofifa_overrides.json"
 
-# ── Platform-aware fonts ──────────────────────────────────────────
-# UI_FONT / MONO_FONT are Windows-only — fall back to the right
-# native family per OS so the UI doesn't look broken on Mac/Linux.
-if sys.platform == "darwin":
-    UI_FONT   = "Helvetica Neue"   # matches macOS system UI
-    MONO_FONT = "Menlo"            # default macOS monospace
-elif sys.platform.startswith("win"):
-    UI_FONT   = "Segoe UI"
-    MONO_FONT = "Consolas"
+IS_MAC = (sys.platform == "darwin")
+IS_WIN = sys.platform.startswith("win")
+
+# ── Fonts ─────────────────────────────────────────────────────────
+if IS_MAC:
+    UI_FONT   = "SF Pro Text"       # macOS 10.11+ system UI
+    UI_ALT    = "Helvetica Neue"    # fallback
+    MONO_FONT = "SF Mono"
+    MONO_ALT  = "Menlo"
+elif IS_WIN:
+    UI_FONT = UI_ALT = "Segoe UI"
+    MONO_FONT = MONO_ALT = "Consolas"
 else:
-    UI_FONT   = "DejaVu Sans"
-    MONO_FONT = "DejaVu Sans Mono"
+    UI_FONT = UI_ALT = "DejaVu Sans"
+    MONO_FONT = MONO_ALT = "DejaVu Sans Mono"
 
-# ── Colors (platform-aware) ───────────────────────────────────────
-# macOS Aqua (Tk 8.5 on system Python, Tk 8.6 on python.org Python)
-# refuses to render dark themes reliably — text on dark bg ends up
-# invisible. We give Mac a clean light theme that plays nice with
-# Aqua, and keep the original dark theme for Windows/Linux.
-if sys.platform == "darwin":
-    BG        = "#ececec"  # app background (system-ish gray)
-    BG2       = "#ffffff"  # card / input area background
-    ACCENT    = "#007aff"  # system blue
-    BTN_GREEN = "#34c759"
-    BTN_BLUE  = "#007aff"
-    BTN_GRAY  = "#d2d2d7"
-    FG        = "#1d1d1f"  # near-black text
-    FG_DIM    = "#6e6e73"  # secondary text
-    RED       = "#ff3b30"
-    YELLOW    = "#ff9500"
+
+def _font(family, size, weight="normal"):
+    """Build a font tuple that tolerates a missing family."""
+    return (family, size, weight) if weight != "normal" else (family, size)
+
+
+# ── Color palette ─────────────────────────────────────────────────
+if IS_MAC:
+    # Apple-inspired light palette
+    BG         = "#f5f5f7"   # window background
+    CARD       = "#ffffff"   # card / elevated surfaces
+    BORDER     = "#d2d2d7"
+    ACCENT     = "#0a84ff"
+    ACCENT_HI  = "#0071e3"
+    SUCCESS    = "#30d158"
+    SUCCESS_HI = "#28b14c"
+    WARNING    = "#ff9f0a"
+    DANGER     = "#ff453a"
+    FG         = "#1d1d1f"
+    FG_DIM     = "#6e6e73"
+    FG_MUTED   = "#8e8e93"
+    LOG_BG     = "#1d1d1f"
+    LOG_FG     = "#f5f5f7"
 else:
-    BG        = "#1a1d24"
-    BG2       = "#23273a"
-    ACCENT    = "#4f8ef7"
-    BTN_GREEN = "#27ae60"
-    BTN_BLUE  = "#2980b9"
-    BTN_GRAY  = "#3d4255"
-    FG        = "#e8eaf0"
-    FG_DIM    = "#7a8099"
-    RED       = "#e74c3c"
-    YELLOW    = "#f1c40f"
+    BG         = "#1a1d24"
+    CARD       = "#23273a"
+    BORDER     = "#3d4255"
+    ACCENT     = "#4f8ef7"
+    ACCENT_HI  = "#2980b9"
+    SUCCESS    = "#27ae60"
+    SUCCESS_HI = "#2ecc71"
+    WARNING    = "#f1c40f"
+    DANGER     = "#e74c3c"
+    FG         = "#e8eaf0"
+    FG_DIM     = "#7a8099"
+    FG_MUTED   = "#555c7a"
+    LOG_BG     = "#12141c"
+    LOG_FG     = "#c8d0e0"
 
-# ── Hardcoded-hex remap for Mac ───────────────────────────────────
-# The body of this file has some one-off hex colors baked in that were
-# picked for the dark theme. Instead of rewriting every call site, we
-# intercept widget creation on macOS and remap any known-dark hex to a
-# light equivalent so Aqua renders everything correctly.
-if sys.platform == "darwin":
-    _COLOR_REMAP = {
-        "#1a1d24": BG,
-        "#23273a": BG2,
-        "#2d3147": "#ffffff",      # URL entry bg
-        "#3d4255": "#d2d2d7",      # borders / BTN_GRAY
-        "#12141c": "#ffffff",      # log bg
-        "#c8d0e0": "#1d1d1f",      # log fg
-        "#e8eaf0": FG,
-        "#7a8099": FG_DIM,
-        "#2a3050": "#eef1f6",
-        "#4d5268": "#c7c7cc",      # hover bg
-        "#2a1f10": "#fff4e0",      # missing players banner
-        "#2a3a2a": "#e6f5ea",      # overrides btn
-        "#3a4a3a": "#d2ebd8",      # overrides hover
-        "#5a2020": "#ffe5e5",      # reset btn
-        "#7a2828": "#ffd0d0",      # reset hover
-        "#7ecb7e": "#1e7d34",      # overrides fg
-        "#a0e0a0": "#0f5c20",      # overrides active fg
-        "#ff8080": "#c62828",      # reset fg
-        "#ffaaaa": "#8a1515",      # reset active fg
-        "#a0b0ff": "#0050c8",      # re-download fg
-        "#c0d0ff": "#003a96",      # re-download active fg
-        "#3a4060": "#e3e7ef",      # re-download hover
-        "#555c7a": "#8e8e93",      # very dim text
-        "#2ecc71": "#34c759",      # green hover
-        "#3498db": "#1b73d3",      # blue hover
-        "#c47c00": "#ff9500",      # orange
-        "#e09000": "#e07a00",
-        "#f0c040": "#b76e00",      # summary warn
-        "#60d080": "#1e7d34",      # summary ok
-        "#27ae60": BTN_GREEN,
-        "#2980b9": BTN_BLUE,
-        "#4f8ef7": ACCENT,
-        "#e74c3c": RED,
-        "#f1c40f": YELLOW,
-    }
 
-    _COLOR_KEYS = (
-        "bg", "background", "fg", "foreground",
-        "activebackground", "activeforeground",
-        "highlightbackground", "highlightcolor",
-        "insertbackground", "selectcolor",
-        "selectbackground", "selectforeground",
-        "disabledbackground", "disabledforeground",
-        "readonlybackground",
-    )
-
-    def _remap(v):
-        if isinstance(v, str) and v.startswith("#"):
-            return _COLOR_REMAP.get(v.lower(), v)
-        return v
-
-    def _remap_kw(kw):
-        for k in _COLOR_KEYS:
-            if k in kw:
-                kw[k] = _remap(kw[k])
-        return kw
-
-    def _patch_init(cls):
-        orig = cls.__init__
-        def new_init(self, master=None, *a, **kw):
-            _remap_kw(kw)
-            orig(self, master, *a, **kw)
-        cls.__init__ = new_init
-
-    def _patch_configure(cls):
-        orig_cfg = cls.configure
-        def new_cfg(self, *a, **kw):
-            _remap_kw(kw)
-            return orig_cfg(self, *a, **kw)
-        cls.configure = new_cfg
-        cls.config = new_cfg
-
-    for _cls in (tk.Frame, tk.Label, tk.Entry, tk.Button,
-                 tk.Radiobutton, tk.Checkbutton, tk.Text, tk.Canvas,
-                 tk.Toplevel, tk.LabelFrame):
-        _patch_init(_cls)
-        _patch_configure(_cls)
-
-    # tk.Tk takes no `master` arg — only patch its configure
-    _patch_configure(tk.Tk)
-
-    try:
-        from tkinter import scrolledtext as _sct
-        _patch_init(_sct.ScrolledText)
-        _patch_configure(_sct.ScrolledText)
-    except Exception:
-        pass
-
+# ── IO helpers ────────────────────────────────────────────────────
 
 def read_last_url():
     try:
@@ -185,220 +110,333 @@ def write_match_type(match_type: str):
         pass
 
 
+# ── Styling ───────────────────────────────────────────────────────
+
+def _setup_ttk_styles(root: tk.Tk):
+    """Configure ttk styles. On Mac we use the native 'aqua' theme and
+    layer on custom styles for accented buttons. On Windows we fall
+    back to 'clam' so we can color ttk widgets consistently with the
+    dark theme."""
+    style = ttk.Style(root)
+
+    if IS_MAC:
+        try:
+            style.theme_use("aqua")
+        except tk.TclError:
+            style.theme_use("default")
+
+        # Typography-only tweaks — aqua handles colors natively for
+        # buttons/entries, so we don't fight the OS.
+        style.configure("TLabel",      font=_font(UI_FONT, 12), background=BG,  foreground=FG)
+        style.configure("Dim.TLabel",  font=_font(UI_FONT, 11), background=BG,  foreground=FG_DIM)
+        style.configure("Card.TLabel", font=_font(UI_FONT, 11), background=CARD, foreground=FG_DIM)
+        style.configure("Header.TLabel", font=_font(UI_FONT, 18, "bold"),
+                        background=BG, foreground=FG)
+        style.configure("Footer.TLabel", font=_font(UI_FONT, 10),
+                        background=BG, foreground=FG_MUTED)
+        style.configure("Status.TLabel", font=_font(UI_FONT, 11),
+                        background=CARD, foreground=FG_DIM)
+
+        style.configure("TFrame",       background=BG)
+        style.configure("Card.TFrame",  background=CARD)
+        style.configure("TLabelframe",  background=BG)
+        style.configure("TLabelframe.Label", background=BG, foreground=FG_DIM)
+
+        style.configure("TEntry", padding=6)
+        style.configure("TRadiobutton", background=BG, foreground=FG,
+                        font=_font(UI_FONT, 12))
+        style.configure("TButton", font=_font(UI_FONT, 12), padding=(14, 6))
+        style.configure("Primary.TButton",   font=_font(UI_FONT, 12, "bold"), padding=(18, 6))
+        style.configure("Secondary.TButton", font=_font(UI_FONT, 12), padding=(16, 6))
+        style.configure("Small.TButton",     font=_font(UI_FONT, 11), padding=(10, 4))
+        style.configure("Tiny.TButton",      font=_font(UI_FONT, 10), padding=(8, 2))
+        style.configure("Danger.TButton",    font=_font(UI_FONT, 11), padding=(14, 5))
+
+        # Treeview
+        style.configure("Treeview",
+                        background=CARD, foreground=FG,
+                        fieldbackground=CARD, rowheight=24,
+                        font=_font(MONO_FONT, 11))
+        style.configure("Treeview.Heading",
+                        background=BG, foreground=FG_DIM,
+                        font=_font(UI_FONT, 11, "bold"))
+        style.map("Treeview", background=[("selected", "#d0e4ff")],
+                             foreground=[("selected", FG)])
+
+    else:
+        style.theme_use("default")
+        style.configure("Treeview",
+                        background=CARD, foreground=FG,
+                        fieldbackground=CARD, rowheight=22,
+                        font=_font(MONO_FONT, 9))
+        style.configure("Treeview.Heading",
+                        background="#2d3147", foreground=FG_DIM,
+                        font=_font(UI_FONT, 9))
+        style.map("Treeview", background=[("selected", "#3a4066")])
+
+
+# ── Widget factories ──────────────────────────────────────────────
+# These abstract the Mac / non-Mac difference. On Mac they return
+# native ttk widgets (aqua renderer). On Windows they return tk
+# widgets so we keep full control over colors for the dark theme.
+
+def make_frame(parent, card=False, **kw):
+    if IS_MAC:
+        return ttk.Frame(parent, style="Card.TFrame" if card else "TFrame", **kw)
+    bg = CARD if card else BG
+    return tk.Frame(parent, bg=bg, **kw)
+
+
+def make_label(parent, text="", variant="default", **kw):
+    """variant: default | dim | header | footer | status | card-dim"""
+    if IS_MAC:
+        style_map = {
+            "default":  "TLabel",
+            "dim":      "Dim.TLabel",
+            "header":   "Header.TLabel",
+            "footer":   "Footer.TLabel",
+            "status":   "Status.TLabel",
+            "card-dim": "Card.TLabel",
+        }
+        lbl = ttk.Label(parent, text=text, style=style_map.get(variant, "TLabel"), **kw)
+        return lbl
+
+    fonts = {
+        "default":  _font(UI_FONT, 10),
+        "dim":      _font(UI_FONT, 9),
+        "header":   _font(UI_FONT, 16, "bold"),
+        "footer":   _font(UI_FONT, 8),
+        "status":   _font(UI_FONT, 9),
+        "card-dim": _font(UI_FONT, 9),
+    }
+    colors = {
+        "default":  (BG,   FG),
+        "dim":      (BG,   FG_DIM),
+        "header":   (BG,   FG),
+        "footer":   (BG,   FG_DIM),
+        "status":   (CARD, FG_DIM),
+        "card-dim": (CARD, FG_DIM),
+    }
+    bg, fg = colors.get(variant, (BG, FG))
+    return tk.Label(parent, text=text, font=fonts.get(variant, _font(UI_FONT, 10)),
+                    bg=bg, fg=fg, **kw)
+
+
+def make_entry(parent, textvariable=None, **kw):
+    if IS_MAC:
+        e = ttk.Entry(parent, textvariable=textvariable,
+                      font=_font(UI_FONT, 13), **kw)
+        return e
+    return tk.Entry(parent, textvariable=textvariable,
+                    font=_font(UI_FONT, 10), bg="#2d3147", fg=FG,
+                    insertbackground=FG, relief="flat",
+                    highlightthickness=1, highlightbackground=BORDER,
+                    highlightcolor=ACCENT, **kw)
+
+
+def make_button(parent, text="", command=None, kind="default", **kw):
+    """kind: default | primary | secondary | small | tiny | danger"""
+    if IS_MAC:
+        style_map = {
+            "default":   "TButton",
+            "primary":   "Primary.TButton",
+            "secondary": "Secondary.TButton",
+            "small":     "Small.TButton",
+            "tiny":      "Tiny.TButton",
+            "danger":    "Danger.TButton",
+        }
+        return ttk.Button(parent, text=text, command=command,
+                          style=style_map.get(kind, "TButton"), **kw)
+
+    # Windows / Linux — colored tk.Button
+    presets = {
+        "default":   dict(bg=BORDER,  fg=FG,     hover="#4d5268",  font_size=10, bold=False),
+        "primary":   dict(bg=SUCCESS, fg="white", hover=SUCCESS_HI, font_size=11, bold=True),
+        "secondary": dict(bg=ACCENT,  fg="white", hover=ACCENT_HI, font_size=11, bold=False),
+        "small":     dict(bg=BORDER,  fg=FG,     hover="#4d5268",  font_size=9,  bold=False),
+        "tiny":      dict(bg=BORDER,  fg=FG_DIM, hover="#4d5268",  font_size=8,  bold=False),
+        "danger":    dict(bg="#5a2020", fg="#ff8080", hover="#7a2828", font_size=10, bold=False),
+    }
+    p = presets.get(kind, presets["default"])
+    fam = UI_FONT
+    font = (fam, p["font_size"], "bold") if p["bold"] else (fam, p["font_size"])
+    return tk.Button(parent, text=text, command=command,
+                     font=font, bg=p["bg"], fg=p["fg"],
+                     relief="flat", cursor="hand2",
+                     activebackground=p["hover"], activeforeground=p["fg"],
+                     padx=14, pady=6, **kw)
+
+
+def make_radio(parent, text, variable, value, command=None):
+    if IS_MAC:
+        return ttk.Radiobutton(parent, text=text, variable=variable,
+                               value=value, command=command,
+                               style="TRadiobutton")
+    return tk.Radiobutton(parent, text=text, variable=variable, value=value,
+                          command=command, bg=BG, fg=FG, selectcolor=CARD,
+                          activebackground=BG, activeforeground=FG,
+                          font=_font(UI_FONT, 10), relief="flat",
+                          cursor="hand2")
+
+
+# ── App ───────────────────────────────────────────────────────────
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Flashscore Ratings")
         self.configure(bg=BG)
         self.resizable(True, True)
-        # Mac widgets render a touch larger — give the window more room
-        if sys.platform == "darwin":
-            self.minsize(720, 560)
-            self.geometry("760x620")
+
+        if IS_MAC:
+            self.minsize(780, 600)
+            self.geometry("860x680")
         else:
             self.minsize(580, 500)
+
+        _setup_ttk_styles(self)
 
         self._proc            = None
         self._running         = False
         self._missing_players = []
-        self._update_banner   = None   # reference to update banner frame
+        self._update_banner   = None
 
         self._build_ui()
         self._load_state()
-        # Check for updates silently in background
         threading.Thread(target=self._bg_update_check, daemon=True).start()
 
     # ── UI Construction ───────────────────────────────────────────
 
     def _build_ui(self):
         # ── Header ────────────────────────────────────────────────
-        hdr = tk.Frame(self, bg=BG, pady=12)
-        hdr.pack(fill="x", padx=20)
-        tk.Label(hdr, text="⚽  Flashscore Ratings", font=(UI_FONT, 16, "bold"),
-                 bg=BG, fg=FG).pack(side="left")
+        hdr = make_frame(self)
+        hdr.pack(fill="x", padx=24, pady=(18, 8))
 
-        self.btn_check_update = tk.Button(
-            hdr, text="⬆  Check for Updates",
-            font=(UI_FONT, 8), bg=BTN_GRAY, fg=FG_DIM,
-            relief="flat", cursor="hand2",
-            activebackground="#4d5268", activeforeground=FG,
-            command=self._check_update_manual, padx=8, pady=3
+        make_label(hdr, "⚽  Flashscore Ratings", variant="header").pack(side="left")
+
+        self.btn_check_update = make_button(
+            hdr, text="Check for Updates", command=self._check_update_manual,
+            kind="tiny"
         )
         self.btn_check_update.pack(side="right")
 
-        # ── URL ───────────────────────────────────────────────────
-        url_frame = tk.Frame(self, bg=BG2, pady=14, padx=16)
-        url_frame.pack(fill="x", padx=16, pady=(0, 8))
+        # ── URL card ──────────────────────────────────────────────
+        url_card = make_frame(self, card=True)
+        url_card.pack(fill="x", padx=24, pady=(6, 10))
 
-        tk.Label(url_frame, text="Flashscore URL", font=(UI_FONT, 9),
-                 bg=BG2, fg=FG_DIM).pack(anchor="w")
+        pad = make_frame(url_card, card=True)
+        pad.pack(fill="x", padx=16, pady=14)
 
-        entry_row = tk.Frame(url_frame, bg=BG2)
-        entry_row.pack(fill="x", pady=(4, 0))
+        make_label(pad, "Flashscore URL", variant="card-dim").pack(anchor="w")
+
+        entry_row = make_frame(pad, card=True)
+        entry_row.pack(fill="x", pady=(6, 0))
 
         self.url_var = tk.StringVar()
-        self.url_entry = tk.Entry(
-            entry_row, textvariable=self.url_var,
-            font=(UI_FONT, 10), bg="#2d3147", fg=FG,
-            insertbackground=FG, relief="flat",
-            highlightthickness=1, highlightbackground="#3d4255",
-            highlightcolor=ACCENT
-        )
-        self.url_entry.pack(side="left", fill="x", expand=True, ipady=6)
+        self.url_entry = make_entry(entry_row, textvariable=self.url_var)
+        if IS_MAC:
+            self.url_entry.pack(side="left", fill="x", expand=True, ipady=4)
+        else:
+            self.url_entry.pack(side="left", fill="x", expand=True, ipady=6)
 
-        btn_paste = tk.Button(
-            entry_row, text="📋 Paste", font=(UI_FONT, 9),
-            bg=BTN_GRAY, fg=FG, relief="flat", cursor="hand2",
-            activebackground="#4d5268", activeforeground=FG,
-            command=self._paste_url, padx=10
-        )
-        btn_paste.pack(side="left", padx=(6, 0))
-
-        btn_clear = tk.Button(
-            entry_row, text="✕", font=(UI_FONT, 9),
-            bg=BTN_GRAY, fg=FG_DIM, relief="flat", cursor="hand2",
-            activebackground="#4d5268", activeforeground=FG,
-            command=lambda: self.url_var.set(""), padx=8
-        )
-        btn_clear.pack(side="left", padx=(4, 0))
+        make_button(entry_row, text="Paste", command=self._paste_url,
+                    kind="small").pack(side="left", padx=(8, 0))
+        make_button(entry_row, text="Clear", command=lambda: self.url_var.set(""),
+                    kind="small").pack(side="left", padx=(6, 0))
 
         # ── Match type ────────────────────────────────────────────
-        type_frame = tk.Frame(self, bg=BG, pady=4)
-        type_frame.pack(fill="x", padx=20)
+        type_row = make_frame(self)
+        type_row.pack(fill="x", padx=24, pady=(0, 4))
 
-        tk.Label(type_frame, text="Match type:", font=(UI_FONT, 10),
-                 bg=BG, fg=FG_DIM).pack(side="left", padx=(0, 12))
-
+        make_label(type_row, "Match type:", variant="dim").pack(side="left", padx=(0, 14))
         self.match_type = tk.StringVar(value="club")
-
-        rb_style = dict(bg=BG, fg=FG, selectcolor=BG2, activebackground=BG,
-                        activeforeground=FG, font=(UI_FONT, 10),
-                        relief="flat", cursor="hand2")
-        tk.Radiobutton(type_frame, text="Club",
-                       variable=self.match_type, value="club",
-                       command=self._on_type_change, **rb_style).pack(side="left")
-        tk.Radiobutton(type_frame, text="National team",
-                       variable=self.match_type, value="national",
-                       command=self._on_type_change, **rb_style).pack(side="left", padx=(12, 0))
+        make_radio(type_row, "Club", self.match_type, "club",
+                   self._on_type_change).pack(side="left")
+        make_radio(type_row, "National team", self.match_type, "national",
+                   self._on_type_change).pack(side="left", padx=(16, 0))
 
         # ── Action buttons ────────────────────────────────────────
-        btn_frame = tk.Frame(self, bg=BG, pady=8)
-        btn_frame.pack(fill="x", padx=16)
+        btn_row = make_frame(self)
+        btn_row.pack(fill="x", padx=24, pady=(10, 6))
 
-        self.btn_run = tk.Button(
-            btn_frame, text="▶  Full Run",
-            font=(UI_FONT, 11, "bold"),
-            bg=BTN_GREEN, fg="white", relief="flat", cursor="hand2",
-            activebackground="#2ecc71", activeforeground="white",
-            command=self._run_full, padx=20, pady=8
-        )
+        self.btn_run = make_button(btn_row, text="▶  Full Run",
+                                   command=self._run_full, kind="primary")
         self.btn_run.pack(side="left", padx=(0, 8))
 
-        self.btn_refresh = tk.Button(
-            btn_frame, text="↻  Refresh Stats",
-            font=(UI_FONT, 11),
-            bg=BTN_BLUE, fg="white", relief="flat", cursor="hand2",
-            activebackground="#3498db", activeforeground="white",
-            command=self._run_refresh, padx=20, pady=8
-        )
+        self.btn_refresh = make_button(btn_row, text="↻  Refresh Stats",
+                                       command=self._run_refresh, kind="secondary")
         self.btn_refresh.pack(side="left", padx=(0, 8))
 
-        self.btn_redownload = tk.Button(
-            btn_frame, text="⬇  Re-download overrides",
-            font=(UI_FONT, 10),
-            bg="#2a3050", fg="#a0b0ff", relief="flat", cursor="hand2",
-            activebackground="#3a4060", activeforeground="#c0d0ff",
-            command=self._run_redownload, padx=14, pady=8
-        )
+        self.btn_redownload = make_button(btn_row, text="⬇  Re-download images",
+                                          command=self._run_redownload, kind="default")
         self.btn_redownload.pack(side="left")
 
-        self.btn_stop = tk.Button(
-            btn_frame, text="■  Stop",
-            font=(UI_FONT, 10),
-            bg=BTN_GRAY, fg=FG_DIM, relief="flat", cursor="hand2",
-            activebackground="#4d5268", activeforeground=FG,
-            command=self._stop, padx=14, pady=8,
-            state="disabled"
-        )
+        self.btn_stop = make_button(btn_row, text="■  Stop",
+                                    command=self._stop, kind="default")
         self.btn_stop.pack(side="right")
+        self._set_widget_state(self.btn_stop, "disabled")
 
-        self.btn_reset = tk.Button(
-            btn_frame, text="🗑  Reset",
-            font=(UI_FONT, 10),
-            bg="#5a2020", fg="#ff8080", relief="flat", cursor="hand2",
-            activebackground="#7a2828", activeforeground="#ffaaaa",
-            command=self._confirm_reset, padx=14, pady=8
-        )
+        self.btn_reset = make_button(btn_row, text="🗑  Reset",
+                                     command=self._confirm_reset, kind="danger")
         self.btn_reset.pack(side="right", padx=(0, 8))
 
-        tk.Button(
-            btn_frame, text="✏  Overrides",
-            font=(UI_FONT, 10),
-            bg="#2a3a2a", fg="#7ecb7e", relief="flat", cursor="hand2",
-            activebackground="#3a4a3a", activeforeground="#a0e0a0",
-            command=self._open_overrides, padx=14, pady=8
-        ).pack(side="right", padx=(0, 6))
+        make_button(btn_row, text="📷  Photos",
+                    command=self._open_player_photos, kind="default"
+                    ).pack(side="right", padx=(0, 6))
+
+        make_button(btn_row, text="✏  Overrides",
+                    command=self._open_overrides, kind="default"
+                    ).pack(side="right", padx=(0, 6))
 
         # ── Status bar ────────────────────────────────────────────
         self.status_var = tk.StringVar(value="Ready.")
-        status_bar = tk.Label(
-            self, textvariable=self.status_var,
-            font=(UI_FONT, 9), bg=BG2, fg=FG_DIM,
-            anchor="w", padx=12, pady=4
-        )
-        status_bar.pack(fill="x", padx=16, pady=(4, 0))
+        status_wrap = make_frame(self, card=True)
+        status_wrap.pack(fill="x", padx=24, pady=(6, 0))
+        status_lbl = make_label(status_wrap, "", variant="status")
+        status_lbl.configure(textvariable=self.status_var, anchor="w")
+        status_lbl.pack(fill="x", padx=12, pady=6)
 
         # ── Log output ────────────────────────────────────────────
-        log_frame = tk.Frame(self, bg=BG, pady=4)
-        log_frame.pack(fill="both", expand=True, padx=16, pady=(4, 12))
+        log_wrap = make_frame(self)
+        log_wrap.pack(fill="both", expand=True, padx=24, pady=(8, 8))
 
-        log_header = tk.Frame(log_frame, bg=BG)
+        log_header = make_frame(log_wrap)
         log_header.pack(fill="x")
-        tk.Label(log_header, text="Output", font=(UI_FONT, 9),
-                 bg=BG, fg=FG_DIM).pack(side="left")
-        tk.Button(log_header, text="Clear log", font=(UI_FONT, 8),
-                  bg=BTN_GRAY, fg=FG_DIM, relief="flat", cursor="hand2",
-                  activebackground="#4d5268", activeforeground=FG,
-                  command=self._clear_log, padx=8, pady=1
-                  ).pack(side="right")
+        make_label(log_header, "Output", variant="dim").pack(side="left")
+        make_button(log_header, text="Clear log", command=self._clear_log,
+                    kind="tiny").pack(side="right")
 
         self.log = scrolledtext.ScrolledText(
-            log_frame, font=(MONO_FONT, 9),
-            bg="#12141c", fg="#c8d0e0",
-            insertbackground=FG, relief="flat",
-            wrap="word", state="disabled"
+            log_wrap, font=_font(MONO_FONT, 11 if IS_MAC else 9),
+            bg=LOG_BG, fg=LOG_FG,
+            insertbackground=LOG_FG, relief="flat",
+            wrap="word", state="disabled",
+            borderwidth=0, highlightthickness=0
         )
-        self.log.pack(fill="both", expand=True, pady=(4, 0))
+        self.log.pack(fill="both", expand=True, pady=(6, 0))
 
         # ── Footer ────────────────────────────────────────────────
-        tk.Label(
-            self, text="Marian Grosu  ·  Flashscore Ratings",
-            font=(UI_FONT, 8), bg=BG, fg=FG_DIM,
-            anchor="center"
-        ).pack(fill="x", pady=(4, 6))
+        make_label(self, "Marian Grosu  ·  Flashscore Ratings",
+                   variant="footer", anchor="center"
+                   ).pack(fill="x", pady=(6, 10))
 
-        # Log color tags
-        self.log.tag_config("ok",     foreground="#27ae60")
-        self.log.tag_config("warn",   foreground=YELLOW)
-        self.log.tag_config("err",    foreground=RED)
-        self.log.tag_config("header", foreground=ACCENT)
-        self.log.tag_config("dim",    foreground=FG_DIM)
+        # ── Log color tags ────────────────────────────────────────
+        self.log.tag_config("ok",     foreground="#7ad97e")
+        self.log.tag_config("warn",   foreground="#ffd666")
+        self.log.tag_config("err",    foreground="#ff8080")
+        self.log.tag_config("header", foreground="#6fb4ff")
+        self.log.tag_config("dim",    foreground="#9aa2b6")
 
         # ── Missing players banner ────────────────────────────────
-        self.missing_frame = tk.Frame(self, bg="#2a1f10", pady=6)
-        self.missing_label = tk.Label(
-            self.missing_frame,
-            text="", font=(UI_FONT, 9, "bold"),
-            bg="#2a1f10", fg=YELLOW, anchor="w"
+        self.missing_frame = make_frame(self, card=True)
+        self.missing_label = make_label(
+            self.missing_frame, "", variant="card-dim", anchor="w"
         )
-        self.missing_label.pack(side="left", padx=(12, 8))
-        tk.Button(
-            self.missing_frame, text="→ Fill in overrides",
-            font=(UI_FONT, 9, "bold"),
-            bg="#c47c00", fg="white", relief="flat", cursor="hand2",
-            activebackground="#e09000", activeforeground="white",
-            command=self._open_overrides_for_missing, padx=10, pady=3
-        ).pack(side="left")
+        self.missing_label.configure(foreground=WARNING)
+        self.missing_label.pack(side="left", padx=(12, 8), pady=8)
+        make_button(self.missing_frame, text="→  Fill in overrides",
+                    command=self._open_overrides_for_missing,
+                    kind="small").pack(side="left", pady=8)
 
     # ── State ─────────────────────────────────────────────────────
 
@@ -406,16 +444,14 @@ class App(tk.Tk):
         url = read_last_url()
         if url:
             self.url_var.set(url)
-        mt = read_match_type()
-        self.match_type.set(mt)
+        self.match_type.set(read_match_type())
 
     def _on_type_change(self):
         write_match_type(self.match_type.get())
 
     def _paste_url(self):
         try:
-            text = self.clipboard_get()
-            self.url_var.set(text.strip())
+            self.url_var.set(self.clipboard_get().strip())
         except Exception:
             pass
 
@@ -432,7 +468,7 @@ class App(tk.Tk):
             tag = "ok"
         elif any(x in line for x in ["⚠", "NOT FOUND", "ERROR", "Missing", "FAILED"]):
             tag = "warn" if "NOT FOUND" in line or "Missing" in line else "err"
-        elif line.startswith("===") or line.startswith("[1/") or line.startswith("[2/") or line.startswith("[3/"):
+        elif line.startswith("===") or re.match(r"^\[\d+/", line):
             tag = "header"
         elif line.startswith("  ") and not line.strip().startswith("→"):
             tag = "dim"
@@ -447,15 +483,23 @@ class App(tk.Tk):
         self.log.see("end")
         self.log.configure(state="disabled")
 
+    @staticmethod
+    def _set_widget_state(w, state):
+        try:
+            if isinstance(w, ttk.Widget):
+                w.state(["disabled"] if state == "disabled" else ["!disabled"])
+            else:
+                w.configure(state=state)
+        except Exception:
+            pass
+
     def _set_running(self, running: bool):
         self._running = running
         state_btns = "disabled" if running else "normal"
         state_stop = "normal"   if running else "disabled"
-        self.btn_run.configure(state=state_btns)
-        self.btn_refresh.configure(state=state_btns)
-        self.btn_redownload.configure(state=state_btns)
-        self.btn_reset.configure(state=state_btns)
-        self.btn_stop.configure(state=state_stop)
+        for w in (self.btn_run, self.btn_refresh, self.btn_redownload, self.btn_reset):
+            self._set_widget_state(w, state_btns)
+        self._set_widget_state(self.btn_stop, state_stop)
         if not running:
             self.status_var.set("Ready.")
 
@@ -480,15 +524,13 @@ class App(tk.Tk):
             f"  • debug files (debug.png, debug_testids.txt)\n\n"
             f"Continue?"
         )
-        ok = mb.askyesno("Reset — are you sure?", msg, icon="warning")
-        if ok:
+        if mb.askyesno("Reset — are you sure?", msg, icon="warning"):
             self._do_reset()
 
     def _do_reset(self):
         import shutil
         output_dir = BASE_DIR / "flashscore_output"
-        deleted = []
-        errors  = []
+        deleted, errors = [], []
 
         images_dir = output_dir / "images"
         if images_dir.exists():
@@ -510,12 +552,8 @@ class App(tk.Tk):
                     errors.append(f"{fname}: {e}")
 
         self._log("\n🗑  RESET\n")
-        if deleted:
-            for d in deleted:
-                self._log(f"  ✓ Deleted: {d}\n")
-        if errors:
-            for e in errors:
-                self._log(f"  ⚠ Error: {e}\n")
+        for d in deleted: self._log(f"  ✓ Deleted: {d}\n")
+        for e in errors:  self._log(f"  ⚠ Error: {e}\n")
         self._log("  Done — you can now run Full Run for a new match.\n\n")
         self.status_var.set("Reset complete.")
 
@@ -530,8 +568,8 @@ class App(tk.Tk):
 
         write_match_type(self.match_type.get())
 
-        # Use the same Python interpreter that's running the launcher
-        # (sys.executable). On Mac "python" doesn't exist, only "python3".
+        # Use the same Python interpreter that's running the launcher.
+        # On Mac "python" often doesn't exist — only "python3".
         cmd = [sys.executable, str(BASE_DIR / script)]
         if url and script == "run.py":
             cmd.append(url)
@@ -581,14 +619,9 @@ class App(tk.Tk):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _run_full(self):
-        self._run_script("run.py")
-
-    def _run_redownload(self):
-        self._run_script("run.py", extra_args=["--images-only"])
-
-    def _run_refresh(self):
-        self._run_script("refresh_stats.py")
+    def _run_full(self):       self._run_script("run.py")
+    def _run_redownload(self): self._run_script("run.py", extra_args=["--images-only"])
+    def _run_refresh(self):    self._run_script("refresh_stats.py")
 
     # ── Refresh Stats summary popup ───────────────────────────────
 
@@ -605,28 +638,39 @@ class App(tk.Tk):
         win.resizable(False, False)
         win.grab_set()
 
-        tk.Label(win, text="Refresh Stats", font=(UI_FONT, 13, "bold"),
-                 bg=BG, fg=FG).pack(pady=(18, 4), padx=24)
-        tk.Frame(win, bg="#2a3050", height=1).pack(fill="x", padx=20, pady=(0, 10))
+        make_label(win, "Refresh Stats", variant="header").pack(pady=(18, 4), padx=24)
+
+        sep = make_frame(win)
+        sep.configure(height=1)
+        if IS_MAC:
+            sep.configure(style="Card.TFrame")
+        else:
+            sep.configure(bg=BORDER)
+        sep.pack(fill="x", padx=20, pady=(0, 10))
 
         lines = text.splitlines()
         if lines:
-            tk.Label(win, text=lines[0], font=(UI_FONT, 11, "bold"),
-                     bg=BG, fg="#a0b0ff").pack(padx=24, pady=(0, 6))
+            hdr_lbl = make_label(win, lines[0])
+            try: hdr_lbl.configure(foreground=ACCENT)
+            except Exception: pass
+            hdr_lbl.pack(padx=24, pady=(0, 6))
 
         body = "\n".join(lines[2:]) if len(lines) > 2 else ""
         if body:
-            color = "#f0c040" if not body.strip().startswith("No changes") else "#60d080"
-            tk.Label(win, text=body, font=(UI_FONT, 10),
-                     bg=BG, fg=color, justify="left", anchor="w").pack(
-                padx=28, pady=(0, 12), fill="x")
+            is_nochange = body.strip().startswith("No changes")
+            color = SUCCESS if is_nochange else WARNING
+            body_lbl = make_label(win, body, justify="left", anchor="w")
+            try: body_lbl.configure(foreground=color)
+            except Exception: pass
+            body_lbl.pack(padx=28, pady=(0, 12), fill="x")
         else:
-            tk.Label(win, text="No changes detected.", font=(UI_FONT, 10),
-                     bg=BG, fg="#60d080").pack(padx=24, pady=(0, 12))
+            nolbl = make_label(win, "No changes detected.")
+            try: nolbl.configure(foreground=SUCCESS)
+            except Exception: pass
+            nolbl.pack(padx=24, pady=(0, 12))
 
-        tk.Button(win, text="OK", font=(UI_FONT, 10, "bold"),
-                  bg=BTN_BLUE, fg="white", relief="flat", cursor="hand2",
-                  padx=28, pady=6, command=win.destroy).pack(pady=(0, 16))
+        make_button(win, text="OK", command=win.destroy,
+                    kind="primary").pack(pady=(0, 16))
 
         win.update_idletasks()
         x = self.winfo_x() + (self.winfo_width()  - win.winfo_width())  // 2
@@ -639,11 +683,11 @@ class App(tk.Tk):
         self._missing_players = missing
         if missing:
             n = len(missing)
-            self.missing_label.config(
+            self.missing_label.configure(
                 text=f"⚠  {n} player{'s' if n > 1 else ''} not found:  "
                      + ",  ".join(missing)
             )
-            self.missing_frame.pack(fill="x", padx=16, pady=(0, 4),
+            self.missing_frame.pack(fill="x", padx=24, pady=(0, 6),
                                     before=self.log.master)
         else:
             self.missing_frame.pack_forget()
@@ -670,20 +714,15 @@ class App(tk.Tk):
         win = tk.Toplevel(self)
         win.title("SoFIFA Overrides")
         win.configure(bg=BG)
-        win.geometry("660x520")
+        win.geometry("720x560")
         win.resizable(True, True)
         win.grab_set()
 
-        tk.Label(
-            win,
-            text="Manual mappings: Flashscore name  →  SoFIFA player page URL",
-            font=(UI_FONT, 9), bg=BG, fg=FG_DIM
-        ).pack(anchor="w", padx=14, pady=(10, 2))
-        tk.Label(
-            win,
-            text="Example: 'Inacio'  →  https://sofifa.com/player/262622/samuele-inacio-pia/",
-            font=(MONO_FONT, 8), bg=BG, fg="#555c7a"
-        ).pack(anchor="w", padx=14, pady=(0, 4))
+        make_label(win, "Manual mappings: Flashscore name  →  SoFIFA player page URL",
+                   variant="dim").pack(anchor="w", padx=16, pady=(14, 2))
+        make_label(win,
+                   "Example: 'Inacio'  →  https://sofifa.com/player/262622/samuele-inacio-pia/",
+                   variant="footer").pack(anchor="w", padx=16, pady=(0, 6))
 
         prefill        = [p for p in (prefill or []) if p]
         pending_entries = []
@@ -693,31 +732,35 @@ class App(tk.Tk):
             to_fill = [p for p in prefill if p not in overrides_now]
 
             if to_fill:
-                pf_outer = tk.Frame(win, bg=BG2, pady=8, padx=12)
-                pf_outer.pack(fill="x", padx=14, pady=(0, 6))
+                pf_outer = make_frame(win, card=True)
+                pf_outer.pack(fill="x", padx=16, pady=(0, 8))
 
-                tk.Label(pf_outer,
-                         text=f"⚠  {len(to_fill)} player(s) not found — paste their SoFIFA URL:",
-                         font=(UI_FONT, 9, "bold"), bg=BG2, fg=YELLOW
-                         ).pack(anchor="w", pady=(0, 6))
+                pf_pad = make_frame(pf_outer, card=True)
+                pf_pad.pack(fill="x", padx=12, pady=10)
+
+                warn_lbl = make_label(pf_pad,
+                    f"⚠  {len(to_fill)} player(s) not found — paste their SoFIFA URL:",
+                    variant="card-dim")
+                try: warn_lbl.configure(foreground=WARNING)
+                except Exception: pass
+                warn_lbl.pack(anchor="w", pady=(0, 8))
 
                 for player_name in to_fill:
-                    row = tk.Frame(pf_outer, bg=BG2)
-                    row.pack(fill="x", pady=2)
+                    row = make_frame(pf_pad, card=True)
+                    row.pack(fill="x", pady=3)
 
                     name_var = tk.StringVar(value=player_name)
                     url_var  = tk.StringVar()
 
-                    tk.Label(row, textvariable=name_var,
-                             font=(UI_FONT, 10, "bold"), bg=BG2, fg=FG,
-                             width=18, anchor="w").pack(side="left", padx=(0, 8))
+                    nlbl = make_label(row, "", variant="card-dim", anchor="w", width=20)
+                    nlbl.configure(textvariable=name_var)
+                    try: nlbl.configure(foreground=FG)
+                    except Exception: pass
+                    nlbl.pack(side="left", padx=(0, 8))
 
-                    url_entry = tk.Entry(row, textvariable=url_var,
-                                         font=(UI_FONT, 9),
-                                         bg="#2d3147", fg=FG, insertbackground=FG,
-                                         relief="flat", highlightthickness=1,
-                                         highlightbackground="#3d4255")
-                    url_entry.pack(side="left", fill="x", expand=True, ipady=4)
+                    url_entry = make_entry(row, textvariable=url_var)
+                    url_entry.pack(side="left", fill="x", expand=True,
+                                   ipady=(2 if IS_MAC else 4))
 
                     def make_paste(e=url_entry):
                         try:
@@ -726,11 +769,8 @@ class App(tk.Tk):
                         except Exception:
                             pass
 
-                    tk.Button(row, text="📋", font=(UI_FONT, 9),
-                              bg=BTN_GRAY, fg=FG, relief="flat", cursor="hand2",
-                              activebackground="#4d5268",
-                              command=make_paste, padx=6, pady=3
-                              ).pack(side="left", padx=(4, 0))
+                    make_button(row, text="Paste", command=make_paste,
+                                kind="small").pack(side="left", padx=(6, 0))
 
                     pending_entries.append((name_var, url_var))
 
@@ -750,39 +790,25 @@ class App(tk.Tk):
                         remaining = [p for p in self._missing_players if p not in saved]
                         self._update_missing_banner(remaining)
 
-                tk.Button(pf_outer, text="💾  Save all",
-                          font=(UI_FONT, 10, "bold"),
-                          bg=BTN_GREEN, fg="white", relief="flat", cursor="hand2",
-                          activebackground="#2ecc71",
-                          command=save_pending, padx=14, pady=5
-                          ).pack(anchor="e", pady=(8, 0))
+                make_button(pf_pad, text="💾  Save all",
+                            command=save_pending, kind="primary"
+                            ).pack(anchor="e", pady=(10, 0))
 
         # ── Existing overrides list ───────────────────────────────
-        list_frame = tk.Frame(win, bg=BG2)
-        list_frame.pack(fill="both", expand=True, padx=14, pady=(0, 6))
+        list_frame = make_frame(win, card=True)
+        list_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
-        columns = ("fs_name", "sofifa_url")
-        tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=8)
+        tree = ttk.Treeview(list_frame, columns=("fs_name", "sofifa_url"),
+                            show="headings", height=10)
         tree.heading("fs_name",    text="Flashscore Name")
         tree.heading("sofifa_url", text="SoFIFA URL")
-        tree.column("fs_name",    width=140, anchor="w")
-        tree.column("sofifa_url", width=420, anchor="w")
+        tree.column("fs_name",    width=160, anchor="w")
+        tree.column("sofifa_url", width=460, anchor="w")
 
-        style = ttk.Style()
-        style.theme_use("default")
-        style.configure("Treeview",
-                         background=BG2, foreground=FG,
-                         fieldbackground=BG2, rowheight=22,
-                         font=(MONO_FONT, 9))
-        style.configure("Treeview.Heading",
-                         background="#2d3147", foreground=FG_DIM,
-                         font=(UI_FONT, 9))
-        style.map("Treeview", background=[("selected", "#3a4066")])
-
-        sb = tk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
+        sb = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
-        tree.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=6)
+        sb.pack(side="right", fill="y", pady=6)
 
         overrides = self._load_overrides()
 
@@ -797,77 +823,226 @@ class App(tk.Tk):
         refresh_tree()
 
         # ── Add form ──────────────────────────────────────────────
-        add_frame = tk.Frame(win, bg=BG, pady=6)
-        add_frame.pack(fill="x", padx=14)
+        add_frame = make_frame(win)
+        add_frame.pack(fill="x", padx=16, pady=6)
 
-        tk.Label(add_frame, text="Flashscore name:", font=(UI_FONT, 9),
-                 bg=BG, fg=FG_DIM).grid(row=0, column=0, sticky="w", padx=(0, 6))
-        entry_name = tk.Entry(add_frame, font=(UI_FONT, 10),
-                              bg="#2d3147", fg=FG, insertbackground=FG,
-                              relief="flat", highlightthickness=1,
-                              highlightbackground="#3d4255", width=18)
+        make_label(add_frame, "Flashscore name:", variant="dim"
+                   ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+        entry_name_var = tk.StringVar()
+        entry_name = make_entry(add_frame, textvariable=entry_name_var, width=18)
         entry_name.grid(row=0, column=1, sticky="ew", padx=(0, 10))
 
-        tk.Label(add_frame, text="SoFIFA URL:", font=(UI_FONT, 9),
-                 bg=BG, fg=FG_DIM).grid(row=0, column=2, sticky="w", padx=(0, 6))
-        entry_url = tk.Entry(add_frame, font=(UI_FONT, 10),
-                             bg="#2d3147", fg=FG, insertbackground=FG,
-                             relief="flat", highlightthickness=1,
-                             highlightbackground="#3d4255", width=34)
+        make_label(add_frame, "SoFIFA URL:", variant="dim"
+                   ).grid(row=0, column=2, sticky="w", padx=(0, 6))
+        entry_url_var = tk.StringVar()
+        entry_url = make_entry(add_frame, textvariable=entry_url_var, width=34)
         entry_url.grid(row=0, column=3, sticky="ew", padx=(0, 10))
         add_frame.columnconfigure(3, weight=1)
 
         def do_add():
-            n = entry_name.get().strip()
-            u = entry_url.get().strip()
+            n = entry_name_var.get().strip()
+            u = entry_url_var.get().strip()
             if not n or not u:
                 return
             overrides[n] = u
             self._save_overrides(overrides)
             refresh_tree()
-            entry_name.delete(0, "end")
-            entry_url.delete(0, "end")
+            entry_name_var.set("")
+            entry_url_var.set("")
             self._log(f"  Override added: '{n}' → {u}\n")
 
         def do_paste_url():
             try:
-                entry_url.delete(0, "end")
-                entry_url.insert(0, win.clipboard_get().strip())
+                entry_url_var.set(win.clipboard_get().strip())
             except Exception:
                 pass
 
-        tk.Button(add_frame, text="+ Add", font=(UI_FONT, 9, "bold"),
-                  bg=BTN_GREEN, fg="white", relief="flat", cursor="hand2",
-                  activebackground="#2ecc71", command=do_add,
-                  padx=10, pady=4).grid(row=0, column=4, padx=(0, 4))
-
-        tk.Button(add_frame, text="📋", font=(UI_FONT, 9),
-                  bg=BTN_GRAY, fg=FG, relief="flat", cursor="hand2",
-                  activebackground="#4d5268", command=do_paste_url,
-                  padx=6, pady=4).grid(row=0, column=5)
+        make_button(add_frame, text="+ Add", command=do_add, kind="primary"
+                    ).grid(row=0, column=4, padx=(0, 4))
+        make_button(add_frame, text="Paste", command=do_paste_url, kind="small"
+                    ).grid(row=0, column=5)
 
         def do_delete():
             sel = tree.selection()
-            if not sel:
-                return
+            if not sel: return
             for item in sel:
                 fs_name = tree.item(item, "values")[0]
                 overrides.pop(fs_name, None)
             self._save_overrides(overrides)
             refresh_tree()
 
-        btn_row = tk.Frame(win, bg=BG, pady=4)
-        btn_row.pack(fill="x", padx=14, pady=(0, 10))
-        tk.Button(btn_row, text="🗑 Delete selected",
-                  font=(UI_FONT, 9), bg="#5a2020", fg="#ff8080",
-                  relief="flat", cursor="hand2",
-                  activebackground="#7a2828", activeforeground="#ffaaaa",
-                  command=do_delete, padx=10, pady=4).pack(side="left")
-        tk.Button(btn_row, text="Close",
-                  font=(UI_FONT, 9), bg=BTN_GRAY, fg=FG,
-                  relief="flat", cursor="hand2",
-                  activebackground="#4d5268",
-                  command=win.destroy, padx=10, pady=4).pack(side="right")
+        btn_row = make_frame(win)
+        btn_row.pack(fill="x", padx=16, pady=(4, 12))
+        make_button(btn_row, text="🗑 Delete selected", command=do_delete,
+                    kind="danger").pack(side="left")
+        make_button(btn_row, text="Close", command=win.destroy,
+                    kind="default").pack(side="right")
+
+    # ── Player Photos window ──────────────────────────────────────
+
+    def _open_player_photos(self):
+        """Fereastra cu URL-urile SoFIFA detectate per jucator + override rapid."""
+        data_path = BASE_DIR / "flashscore_output" / "data.json"
+        if not data_path.exists():
+            import tkinter.messagebox as mb
+            mb.showinfo("Player Photos", "No match data found.\nRun Full Run first.")
+            return
+
+        try:
+            with open(data_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            import tkinter.messagebox as mb
+            mb.showerror("Player Photos", f"Could not read data.json:\n{e}")
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Player SoFIFA URLs")
+        win.configure(bg=BG)
+        win.geometry("860x600")
+        win.resizable(True, True)
+        win.grab_set()
+
+        match_info = data.get("match", {})
+        title_text = (f"{match_info.get('home_team','')}  {match_info.get('home_score','')} - "
+                      f"{match_info.get('away_score','')}  {match_info.get('away_team','')}")
+        make_label(win, title_text, variant="dim").pack(anchor="w", padx=16, pady=(12, 2))
+        make_label(win,
+                   "Select a player → paste new SoFIFA URL → Save Override.  Then click Redownload Photos.",
+                   variant="footer").pack(anchor="w", padx=16, pady=(0, 6))
+
+        # ── Treeview ───────────────────────────────────────────────
+        cols = ("group", "name", "kit", "sofifa_url", "override")
+        tree = ttk.Treeview(win, columns=cols, show="headings", height=16)
+        tree.heading("group",      text="Group")
+        tree.heading("name",       text="Player")
+        tree.heading("kit",        text="Kit")
+        tree.heading("sofifa_url", text="SoFIFA URL (detected)")
+        tree.heading("override",   text="Override set?")
+        tree.column("group",      width=90,  anchor="w", stretch=False)
+        tree.column("name",       width=140, anchor="w")
+        tree.column("kit",        width=40,  anchor="center", stretch=False)
+        tree.column("sofifa_url", width=420, anchor="w")
+        tree.column("override",   width=90,  anchor="center", stretch=False)
+
+        sb = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+
+        tree_frame = make_frame(win, card=True)
+        tree_frame.pack(fill="both", expand=True, padx=16, pady=(0, 4))
+        tree.pack(in_=tree_frame, side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+        sb.pack(in_=tree_frame, side="right", fill="y", pady=4)
+
+        overrides_now = self._load_overrides()
+
+        def populate_tree():
+            tree.delete(*tree.get_children())
+            overrides_fresh = self._load_overrides()
+            overrides_now.clear()
+            overrides_now.update(overrides_fresh)
+
+            groups = [
+                (data.get("home", {}).get("players", []),     "Home starter"),
+                (data.get("home", {}).get("substitutes", []), "Home sub"),
+                (data.get("away", {}).get("players", []),     "Away starter"),
+                (data.get("away", {}).get("substitutes", []), "Away sub"),
+            ]
+            for group_label, players in groups:
+                for p in players:
+                    pname = p.get("name", "")
+                    kit   = p.get("number", "")
+                    surl  = p.get("sofifa_url", "")
+                    # Verifica daca e override setat (dupa nume)
+                    has_ov = any(pname and (
+                        pname.lower() == fs.lower() or
+                        pname.lower().rstrip('.').rstrip() in fs.lower()
+                    ) for fs in overrides_fresh)
+                    ov_label = "✓ YES" if has_ov else ""
+                    tree.insert("", "end",
+                                values=(group_label, pname, kit, surl or "—", ov_label))
+
+        populate_tree()
+
+        # ── Override editor ────────────────────────────────────────
+        edit_frame = make_frame(win)
+        edit_frame.pack(fill="x", padx=16, pady=(0, 4))
+
+        make_label(edit_frame, "Player:", variant="dim").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        sel_name_var = tk.StringVar(value="(select a row above)")
+        sel_lbl = make_label(edit_frame, "", variant="dim", anchor="w", width=22)
+        sel_lbl.configure(textvariable=sel_name_var)
+        try: sel_lbl.configure(foreground=FG)
+        except Exception: pass
+        sel_lbl.grid(row=0, column=1, sticky="w", padx=(0, 12))
+
+        make_label(edit_frame, "New SoFIFA URL:", variant="dim").grid(row=0, column=2, sticky="w", padx=(0, 6))
+        new_url_var = tk.StringVar()
+        url_entry = make_entry(edit_frame, textvariable=new_url_var, width=40)
+        url_entry.grid(row=0, column=3, sticky="ew", padx=(0, 8))
+        edit_frame.columnconfigure(3, weight=1)
+
+        def on_select(event=None):
+            sel = tree.selection()
+            if not sel:
+                return
+            vals = tree.item(sel[0], "values")
+            sel_name_var.set(vals[1] if vals else "")
+            # Pre-fill with current sofifa_url if it looks like a real URL
+            current_url = vals[3] if vals and vals[3] != "—" else ""
+            new_url_var.set(current_url)
+
+        tree.bind("<<TreeviewSelect>>", on_select)
+
+        def do_paste():
+            try:
+                new_url_var.set(win.clipboard_get().strip())
+            except Exception:
+                pass
+
+        def do_save_override():
+            name = sel_name_var.get().strip()
+            url  = new_url_var.get().strip()
+            if not name or name == "(select a row above)":
+                return
+            if not url:
+                return
+            ov = self._load_overrides()
+            ov[name] = url
+            self._save_overrides(ov)
+            populate_tree()
+            self._log(f"  Override saved: '{name}' → {url}\n")
+            new_url_var.set("")
+
+        def do_delete_override():
+            name = sel_name_var.get().strip()
+            if not name or name == "(select a row above)":
+                return
+            ov = self._load_overrides()
+            if name in ov:
+                del ov[name]
+                self._save_overrides(ov)
+                populate_tree()
+                self._log(f"  Override removed: '{name}'\n")
+
+        make_button(edit_frame, text="Paste", command=do_paste, kind="small"
+                    ).grid(row=0, column=4, padx=(0, 4))
+        make_button(edit_frame, text="Save Override", command=do_save_override, kind="primary"
+                    ).grid(row=0, column=5, padx=(0, 4))
+        make_button(edit_frame, text="Remove Override", command=do_delete_override, kind="danger"
+                    ).grid(row=0, column=6)
+
+        # ── Bottom buttons ─────────────────────────────────────────
+        btn_row2 = make_frame(win)
+        btn_row2.pack(fill="x", padx=16, pady=(0, 12))
+
+        def do_redownload():
+            win.destroy()
+            self._run_redownload()
+
+        make_button(btn_row2, text="⬇  Redownload Photos (uses overrides)",
+                    command=do_redownload, kind="secondary").pack(side="left")
+        make_button(btn_row2, text="Close", command=win.destroy,
+                    kind="default").pack(side="right")
 
     # ── Stop ──────────────────────────────────────────────────────
 
@@ -883,50 +1058,42 @@ class App(tk.Tk):
     # ── Auto-update ───────────────────────────────────────────────
 
     def _bg_update_check(self):
-        """Background thread: silently check for updates on startup."""
         try:
             import updater
             available, local, remote = updater.check_for_update(timeout=8)
             if available:
                 self.after(0, self._show_update_banner, local, remote)
         except Exception:
-            pass  # No internet or updater not configured — fail silently
+            pass
 
     def _show_update_banner(self, local: str, remote: str):
-        """Show a non-intrusive update banner below the header."""
         if self._update_banner:
             self._update_banner.destroy()
 
-        banner = tk.Frame(self, bg="#1e3a1e", pady=6)
+        banner = make_frame(self, card=True)
         self._update_banner = banner
 
-        tk.Label(
-            banner,
-            text=f"⬆  Update available: v{local}  →  v{remote}",
-            font=(UI_FONT, 9, "bold"), bg="#1e3a1e", fg="#7ecb7e"
-        ).pack(side="left", padx=(14, 12))
+        lbl = make_label(
+            banner, f"⬆  Update available: v{local}  →  v{remote}",
+            variant="card-dim"
+        )
+        try: lbl.configure(foreground=SUCCESS)
+        except Exception: pass
+        lbl.pack(side="left", padx=(14, 12), pady=6)
 
-        tk.Button(
-            banner, text="Update now",
-            font=(UI_FONT, 9, "bold"),
-            bg=BTN_GREEN, fg="white", relief="flat", cursor="hand2",
-            activebackground="#2ecc71",
-            command=lambda: self._do_update(remote),
-            padx=10, pady=3
-        ).pack(side="left")
+        make_button(banner, text="Update now",
+                    command=lambda: self._do_update(remote),
+                    kind="primary").pack(side="left", pady=6)
 
-        tk.Button(
-            banner, text="✕", font=(UI_FONT, 8),
-            bg="#1e3a1e", fg="#7ecb7e", relief="flat", cursor="hand2",
-            command=banner.destroy, padx=6
-        ).pack(side="right", padx=8)
+        make_button(banner, text="✕", command=banner.destroy,
+                    kind="tiny").pack(side="right", padx=8, pady=6)
 
-        # Insert banner below header (before url_frame)
-        banner.pack(fill="x", padx=16, pady=(0, 4))
+        banner.pack(fill="x", padx=24, pady=(0, 6))
 
     def _check_update_manual(self):
-        """Called when user clicks 'Check for Updates'."""
-        self.btn_check_update.configure(state="disabled", text="Checking...")
+        self._set_widget_state(self.btn_check_update, "disabled")
+        try: self.btn_check_update.configure(text="Checking...")
+        except Exception: pass
         self.update_idletasks()
 
         def worker():
@@ -941,7 +1108,10 @@ class App(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _update_check_result(self, available: bool, local: str, remote: str, error: str = ""):
-        self.btn_check_update.configure(state="normal", text="⬆  Check for Updates")
+        self._set_widget_state(self.btn_check_update, "normal")
+        try: self.btn_check_update.configure(text="Check for Updates")
+        except Exception: pass
+
         if error:
             self.status_var.set(f"Update check failed: {error}")
             return
@@ -954,7 +1124,6 @@ class App(tk.Tk):
                 self.status_var.set(f"Already up to date (v{local}).")
 
     def _do_update(self, remote: str):
-        """Apply update: download files from GitHub, then prompt restart."""
         import tkinter.messagebox as mb
 
         if self._running:
@@ -971,24 +1140,24 @@ class App(tk.Tk):
         if not ok:
             return
 
-        # Show progress window
         prog_win = tk.Toplevel(self)
         prog_win.title("Updating...")
         prog_win.configure(bg=BG)
         prog_win.resizable(False, False)
         prog_win.grab_set()
 
-        tk.Label(prog_win, text=f"Installing v{remote}...", font=(UI_FONT, 11, "bold"),
-                 bg=BG, fg=FG).pack(pady=(18, 6), padx=24)
+        make_label(prog_win, f"Installing v{remote}...", variant="header"
+                   ).pack(pady=(18, 6), padx=24)
 
         progress_var = tk.StringVar(value="Starting...")
-        tk.Label(prog_win, textvariable=progress_var, font=(MONO_FONT, 9),
-                 bg=BG, fg=FG_DIM, justify="left").pack(padx=24, pady=(0, 14))
+        pl = make_label(prog_win, "", variant="dim", justify="left")
+        pl.configure(textvariable=progress_var)
+        pl.pack(padx=24, pady=(0, 14))
 
         prog_win.update_idletasks()
-        x = self.winfo_x() + (self.winfo_width()  - 320) // 2
-        y = self.winfo_y() + (self.winfo_height() - 160) // 2
-        prog_win.geometry(f"320x160+{x}+{y}")
+        x = self.winfo_x() + (self.winfo_width()  - 340) // 2
+        y = self.winfo_y() + (self.winfo_height() - 170) // 2
+        prog_win.geometry(f"340x170+{x}+{y}")
 
         def worker():
             try:
@@ -1002,7 +1171,6 @@ class App(tk.Tk):
                 updated, failed, ae_results = updater.apply_update(on_progress)
                 self.after(0, prog_win.destroy)
 
-                # Build result message
                 lines = [f"✓ Updated {len(updated)} file(s)."]
 
                 if ae_results:

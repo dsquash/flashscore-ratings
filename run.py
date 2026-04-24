@@ -53,7 +53,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
 # ── Tipul meciului ─────────────────────────────────────────────
 # "club"     = meci de club (Premier League, Champions League etc.)
 # "national" = meci de nationala (Nations League, CM, CE etc.)
-MATCH_TYPE = "national"
+MATCH_TYPE = "club"
 
 # ── SoFIFA API ─────────────────────────────────────────────────
 SOFIFA_API_BASE  = "https://api.sofifa.net"
@@ -823,12 +823,13 @@ def _load_overrides() -> dict:
 
 async def fetch_from_roster(name: str, roster: list, page,
                              client: httpx.AsyncClient, is_sub: bool = False,
-                             overrides: dict = None):
+                             overrides: dict = None, match_type: str = "club"):
     """
     Cauta jucatorul in roster-ul pre-incarcat al echipei.
-    - is_sub=True: INTOTDEAUNA viziteaza pagina jucatorului pentru kit number (Kit Number Club)
+    - is_sub=True: INTOTDEAUNA viziteaza pagina jucatorului pentru kit number
     - overrides: dict cu mapari manuale Flashscore name → SoFIFA URL
-    Returneaza (photo_bytes, kit_number, source_label) sau (None, '', None).
+    - match_type: 'club' sau 'national' (pentru kit number preferat)
+    Returneaza (photo_bytes, kit_number, source_label, sofifa_url) sau (None, '', None, '').
     """
     clean = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
     clean = re.sub(r'\.$', '', clean).strip()
@@ -849,11 +850,12 @@ async def fetch_from_roster(name: str, roster: list, page,
             try:
                 await safe_goto(page, override_url, timeout=35000)
                 await page.wait_for_timeout(500)
-                # Scroll ca sa triggeram lazy-loading
-                await page.evaluate("window.scrollTo(0, 300)")
+                # Scroll complet ca sa triggeram lazy-loading
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 await page.wait_for_timeout(600)
+                await page.evaluate("window.scrollTo(0, 0)")
 
-                pg = await page.evaluate("""() => {
+                pg = await page.evaluate("""(matchType) => {
                     let photoUrl = '';
                     for (const img of document.querySelectorAll('img')) {
                         // Cauta in src, data-src si srcset (lazy loading SoFIFA)
@@ -877,12 +879,15 @@ async def fetch_from_roster(name: str, roster: list, page,
                     const body = document.body.innerText;
                     const mClub = body.match(/Kit\\s*Number\\s*\\(Club\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
                     const mNat  = body.match(/Kit\\s*Number\\s*\\(National\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
-                    const mAny  = body.match(/Kit\\s*(?:Number|#)?\\s*[:\\-]?\\s*(\\d{1,3})/i);
-                    if (mClub) kit = mClub[1];
-                    else if (mAny && (!mNat || mAny[1] !== mNat[1])) kit = mAny[1];
-                    else if (mNat) kit = mNat[1];
+                    if (matchType === 'national') {
+                        if (mNat) kit = mNat[1];
+                        else if (mClub) kit = mClub[1];
+                    } else {
+                        if (mClub) kit = mClub[1];
+                        else if (mNat) kit = mNat[1];
+                    }
                     return { photoUrl, kit };
-                }""") or {}
+                }""", match_type) or {}
 
                 kit = pg.get('kit', '')
                 photo_url = pg.get('photoUrl', '')
@@ -897,7 +902,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                             r = await client.get(try_url, headers=hdrs,
                                                  timeout=15, follow_redirects=True)
                             if r.status_code == 200 and len(r.content) > 300:
-                                return r.content, kit, "override"
+                                return r.content, kit, "override", override_url
                         except Exception:
                             pass
                     print(f"[404 toate marimile]", end=" ")
@@ -936,32 +941,47 @@ async def fetch_from_roster(name: str, roster: list, page,
         # ── 3. Pagina jucatorului:
         #   - INTOTDEAUNA pt rezerve (kit sigur de pe player page)
         #   - Fallback pt titulari daca thumbnail invalid
-        need_page = is_sub or photo_raw is None
+        #   - INTOTDEAUNA pt national (kit national de pe player page)
+        need_page = is_sub or photo_raw is None or match_type == "national"
         if need_page and best.get('playerUrl'):
             try:
                 await safe_goto(page, best['playerUrl'], timeout=35000)
-                await page.wait_for_timeout(300)
-                pg = await page.evaluate("""() => {
+                await page.wait_for_timeout(600)
+                # Scroll complet pentru lazy-loading (kit number + poze)
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_timeout(500)
+                await page.evaluate("window.scrollTo(0, 0)")
+                pg = await page.evaluate("""(matchType) => {
                     let photoUrl = '';
                     for (const img of document.querySelectorAll('img')) {
-                        const src = img.src || '';
-                        const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
-                        if (m && parseInt(m[1]) > 0) {
-                            photoUrl = src.replace('_120.png','_240.png')
-                                          .replace('_60.png','_240.png');
-                            break;
+                        const candidates = [
+                            img.src || '',
+                            img.getAttribute('data-src') || '',
+                            img.getAttribute('src') || ''
+                        ];
+                        for (const src of candidates) {
+                            const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
+                            if (m && parseInt(m[1]) > 0) {
+                                photoUrl = src.replace('_120.png','_240.png')
+                                              .replace('_60.png','_240.png');
+                                break;
+                            }
                         }
+                        if (photoUrl) break;
                     }
                     let kit = '';
                     const body = document.body.innerText;
                     const mClub = body.match(/Kit\\s*Number\\s*\\(Club\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
                     const mNat  = body.match(/Kit\\s*Number\\s*\\(National\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
-                    const mAny  = body.match(/Kit\\s*(?:Number|#)?\\s*[:\\-]?\\s*(\\d{1,3})/i);
-                    if (mClub) kit = mClub[1];
-                    else if (mAny && (!mNat || mAny[1] !== mNat[1])) kit = mAny[1];
-                    else if (mNat) kit = mNat[1];
+                    if (matchType === 'national') {
+                        if (mNat) kit = mNat[1];
+                        else if (mClub) kit = mClub[1];
+                    } else {
+                        if (mClub) kit = mClub[1];
+                        else if (mNat) kit = mNat[1];
+                    }
                     return { photoUrl, kit };
-                }""") or {}
+                }""", match_type) or {}
                 # Kit de pe player page are prioritate (mai sigur decat roster table)
                 if pg.get('kit'):
                     kit = pg['kit']
@@ -977,7 +997,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                 print(f"\n        [player page exc] {e}")
 
         if photo_raw is not None:
-            return photo_raw, kit, photo_src
+            return photo_raw, kit, photo_src, best.get('playerUrl', '')
 
     # ── 4. Fallback final: cautare directa SoFIFA dupa nume ──────
     # (folosit cand jucatorul nu e in roster: ex. imprumut, jucator nou)
@@ -1008,36 +1028,54 @@ async def fetch_from_roster(name: str, roster: list, page,
             return best;
         }""", clean)
         if pg2 and pg2.get('url'):
-            await safe_goto(page, pg2['url'], timeout=35000)
-            await page.wait_for_timeout(300)
-            pg3 = await page.evaluate("""() => {
+            direct_url = pg2['url']
+            await safe_goto(page, direct_url, timeout=35000)
+            await page.wait_for_timeout(600)
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_timeout(500)
+            await page.evaluate("window.scrollTo(0, 0)")
+            pg3 = await page.evaluate("""(matchType) => {
                 let photoUrl = '';
                 for (const img of document.querySelectorAll('img')) {
-                    const src = img.src || '';
-                    const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
-                    if (m && parseInt(m[1]) > 0) {
-                        photoUrl = src.replace('_120.png','_240.png')
-                                      .replace('_60.png','_240.png');
-                        break;
+                    const candidates = [
+                        img.src || '',
+                        img.getAttribute('data-src') || '',
+                        img.getAttribute('src') || ''
+                    ];
+                    for (const src of candidates) {
+                        const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
+                        if (m && parseInt(m[1]) > 0) {
+                            photoUrl = src.replace('_120.png','_240.png')
+                                          .replace('_60.png','_240.png');
+                            break;
+                        }
                     }
+                    if (photoUrl) break;
                 }
                 let kit = '';
                 const body = document.body.innerText;
                 const mClub = body.match(/Kit\\s*Number\\s*\\(Club\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
-                if (mClub) kit = mClub[1];
+                const mNat  = body.match(/Kit\\s*Number\\s*\\(National\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
+                if (matchType === 'national') {
+                    if (mNat) kit = mNat[1];
+                    else if (mClub) kit = mClub[1];
+                } else {
+                    if (mClub) kit = mClub[1];
+                    else if (mNat) kit = mNat[1];
+                }
                 return { photoUrl, kit };
-            }""") or {}
+            }""", match_type) or {}
             if pg3.get('kit'): kit = pg3['kit']
             if pg3.get('photoUrl'):
                 r = await client.get(
                     pg3['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
                 )
                 if r.status_code == 200 and len(r.content) > 300:
-                    return r.content, kit, "direct_search"
+                    return r.content, kit, "direct_search", direct_url
     except Exception as e:
         print(f"[search exc: {e}]", end=" ", flush=True)
 
-    return None, '', None
+    return None, '', None, ''
 
 def generate_placeholder(name: str, dest: Path) -> bool:
     """
@@ -1141,7 +1179,7 @@ def save_image(raw: bytes, path: Path) -> bool:
 
 
 
-async def download_all_images(data: dict):
+async def download_all_images(data: dict, images_only: bool = False):
     from playwright.async_api import async_playwright
 
     print(f"\n[2/3] Descarcare poze + numere (SoFIFA roster per echipa)...")
@@ -1248,10 +1286,20 @@ async def download_all_images(data: dict):
                     # Este placeholder daca a fost inregistrat in placeholders.json
                     is_placeholder = file_key in placeholders
 
+                    # In modul --images-only, forteaza re-download pentru jucatorii cu override
+                    clean_name_for_check = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
+                    clean_name_for_check = re.sub(r'\.$', '', clean_name_for_check).strip()
+                    clean_no_init_check  = re.sub(r'\s+[A-Z]\.?$', '', clean_name_for_check).strip()
+                    has_override = overrides and any(
+                        _norm(fs) in (_norm(clean_name_for_check), _norm(clean_no_init_check))
+                        for fs in overrides
+                    )
+
                     # Sare peste cache daca:
                     # - fisierul nu exista (normal)
                     # - este placeholder (va fi re-descarcat)
-                    if dest.exists() and not is_placeholder:
+                    # - are override activ si rulam --images-only (re-descarcam cu noul URL)
+                    if dest.exists() and not is_placeholder and not (images_only and has_override):
                         print(f"  ✓ {name} (cached)")
                         ok += 1
                         continue
@@ -1260,12 +1308,12 @@ async def download_all_images(data: dict):
                         print(f"  → {name} (placeholder — re-incerc) ...", end=" ", flush=True)
                     else:
                         print(f"  → {name} ...", end=" ", flush=True)
-                    raw = kit = src = None
+                    raw = kit = src = sofifa_url = None
 
                     try:
-                        raw, kit, src = await fetch_from_roster(
+                        raw, kit, src, sofifa_url = await fetch_from_roster(
                             name, roster, page, client, is_sub=is_sub,
-                            overrides=overrides
+                            overrides=overrides, match_type=MATCH_TYPE
                         )
                     except BaseException as e:
                         print(f"\n      ⚠ Crash '{name}': {type(e).__name__}: {e}")
@@ -1275,8 +1323,17 @@ async def download_all_images(data: dict):
                         except BaseException:
                             pass
 
-                    if kit and is_sub:
-                        p["number"] = kit
+                    # Actualizeaza kit number:
+                    # - intotdeauna la rezerve (nu au numar de pe Flashscore)
+                    # - la meciuri nationale (kit national, nu cel de club)
+                    # - la titulari fara numar
+                    if kit:
+                        if is_sub or not p.get("number") or MATCH_TYPE == "national":
+                            p["number"] = kit
+
+                    # Stocheaza URL-ul SoFIFA folosit (pentru override manual ulterior)
+                    if sofifa_url:
+                        p["sofifa_url"] = sofifa_url
 
                     if raw and save_image(raw, dest):
                         num_label = f" #{p.get('number','')}" if p.get('number') else ""
@@ -1365,7 +1422,7 @@ def main():
             return
 
     # 2. Download imagini de pe SoFIFA
-    asyncio.run(download_all_images(data))
+    asyncio.run(download_all_images(data, images_only=images_only))
 
     # 3. Curata img_src din data.json final (nu e nevoie in AE)
     for group in [data["home"]["players"], data["away"]["players"],

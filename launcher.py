@@ -623,6 +623,42 @@ class App(tk.Tk):
     def _run_redownload(self): self._run_script("run.py", extra_args=["--images-only"])
     def _run_refresh(self):    self._run_script("refresh_stats.py")
 
+    def _run_player_download(self, player_name: str):
+        """Descarca poza unui singur jucator (dupa ce s-a setat un override)."""
+        write_match_type(self.match_type.get())
+        cmd = [sys.executable, str(BASE_DIR / "run.py"), "--player", player_name]
+        label = f"Downloading photo: {player_name}"
+        self._log(f"\n{'─'*50}\n▶ {label}\n{'─'*50}\n")
+        self.status_var.set(f"Downloading: {player_name}...")
+        self._set_running(True)
+
+        def worker():
+            try:
+                import os
+                env = os.environ.copy()
+                env["PYTHONIOENCODING"] = "utf-8"
+                self._proc = subprocess.Popen(
+                    cmd, cwd=str(BASE_DIR),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding="utf-8", errors="replace",
+                    bufsize=1, env=env
+                )
+                for line in self._proc.stdout:
+                    self.after(0, self._log, line)
+                self._proc.wait()
+                rc  = self._proc.returncode
+                msg = f"✓ {player_name} — photo updated." if rc == 0 else f"⚠ Exited with code {rc}."
+                self.after(0, self._log, f"\n{msg}\n")
+                self.after(0, self.status_var.set, msg)
+            except Exception as e:
+                self.after(0, self._log, f"\nERROR: {e}\n")
+                self.after(0, self.status_var.set, f"ERROR: {e}")
+            finally:
+                self._proc = None
+                self.after(0, self._set_running, False)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     # ── Refresh Stats summary popup ───────────────────────────────
 
     def _show_refresh_summary(self):
@@ -1031,8 +1067,10 @@ class App(tk.Tk):
             ov = self._load_overrides()
             ov[name] = url
             self._save_overrides(ov)
-            populate_tree()
             self._log(f"  Override saved: '{name}' → {url}\n")
+            # Inchide fereastra si descarca automat DOAR acest jucator
+            win.destroy()
+            self._run_player_download(name)
 
         def do_remove():
             name = sel_name_var.get().strip()

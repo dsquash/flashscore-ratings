@@ -877,8 +877,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                     }
                     let kit = '';
                     const body = document.body.innerText;
-                    const mClub = body.match(/Kit\\s*Number\\s*\\(Club\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
-                    const mNat  = body.match(/Kit\\s*Number\\s*\\(National\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
+                    // SoFIFA scrie "Kit Number Club 17" sau "Kit Number (Club): 17"
+                    const mClub = body.match(/Kit\\s*Number\\s*(?:\\(Club\\)|Club)[\\s:\\-\\t]*(\\d{1,3})/i);
+                    const mNat  = body.match(/Kit\\s*Number\\s*(?:\\(National\\)|National)[\\s:\\-\\t]*(\\d{1,3})/i);
                     if (matchType === 'national') {
                         if (mNat) kit = mNat[1];
                         else if (mClub) kit = mClub[1];
@@ -971,8 +972,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                     }
                     let kit = '';
                     const body = document.body.innerText;
-                    const mClub = body.match(/Kit\\s*Number\\s*\\(Club\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
-                    const mNat  = body.match(/Kit\\s*Number\\s*\\(National\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
+                    // SoFIFA scrie "Kit Number Club 17" sau "Kit Number (Club): 17"
+                    const mClub = body.match(/Kit\\s*Number\\s*(?:\\(Club\\)|Club)[\\s:\\-\\t]*(\\d{1,3})/i);
+                    const mNat  = body.match(/Kit\\s*Number\\s*(?:\\(National\\)|National)[\\s:\\-\\t]*(\\d{1,3})/i);
                     if (matchType === 'national') {
                         if (mNat) kit = mNat[1];
                         else if (mClub) kit = mClub[1];
@@ -1054,8 +1056,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                 }
                 let kit = '';
                 const body = document.body.innerText;
-                const mClub = body.match(/Kit\\s*Number\\s*\\(Club\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
-                const mNat  = body.match(/Kit\\s*Number\\s*\\(National\\)\\s*[:\\-]?\\s*(\\d{1,3})/i);
+                // SoFIFA scrie "Kit Number Club 17" sau "Kit Number (Club): 17"
+                const mClub = body.match(/Kit\\s*Number\\s*(?:\\(Club\\)|Club)[\\s:\\-\\t]*(\\d{1,3})/i);
+                const mNat  = body.match(/Kit\\s*Number\\s*(?:\\(National\\)|National)[\\s:\\-\\t]*(\\d{1,3})/i);
                 if (matchType === 'national') {
                     if (mNat) kit = mNat[1];
                     else if (mClub) kit = mClub[1];
@@ -1179,10 +1182,17 @@ def save_image(raw: bytes, path: Path) -> bool:
 
 
 
-async def download_all_images(data: dict, images_only: bool = False):
+async def download_all_images(data: dict, images_only: bool = False,
+                              player_only: str = None):
+    """
+    player_only: daca e setat, descarca DOAR jucatorul cu acel nume (override rapid).
+    """
     from playwright.async_api import async_playwright
 
-    print(f"\n[2/3] Descarcare poze + numere (SoFIFA roster per echipa)...")
+    if player_only:
+        print(f"\n[2/3] Descarcare poza pentru: {player_only}...")
+    else:
+        print(f"\n[2/3] Descarcare poze + numere (SoFIFA roster per echipa)...")
 
     # Incarca overrides manuale (sofifa_overrides.json)
     overrides = _load_overrides()
@@ -1283,10 +1293,15 @@ async def download_all_images(data: dict, images_only: bool = False):
                     dest = IMAGES_DIR / f"{prefix}_{i}.png"
                     file_key = f"{prefix}_{i}"
 
+                    # Modul single-player: sare peste toti in afara de cel dorit
+                    if player_only and _norm(name) != _norm(player_only):
+                        # Pastreaza numerele existente pentru jucatorii sarite
+                        continue
+
                     # Este placeholder daca a fost inregistrat in placeholders.json
                     is_placeholder = file_key in placeholders
 
-                    # In modul --images-only, forteaza re-download pentru jucatorii cu override
+                    # In modul --images-only sau --player, forteaza re-download pt overrides
                     clean_name_for_check = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
                     clean_name_for_check = re.sub(r'\.$', '', clean_name_for_check).strip()
                     clean_no_init_check  = re.sub(r'\s+[A-Z]\.?$', '', clean_name_for_check).strip()
@@ -1294,6 +1309,11 @@ async def download_all_images(data: dict, images_only: bool = False):
                         _norm(fs) in (_norm(clean_name_for_check), _norm(clean_no_init_check))
                         for fs in overrides
                     )
+
+                    # In modul --player: sterge poza cache indiferent (re-download fortat)
+                    if player_only and dest.exists():
+                        dest.unlink(missing_ok=True)
+                        is_placeholder = False
 
                     # Sare peste cache daca:
                     # - fisierul nu exista (normal)
@@ -1382,7 +1402,17 @@ async def download_all_images(data: dict, images_only: bool = False):
 def main():
     # Suporta flag --images-only: sare peste scraping, foloseste data.json existent
     images_only = "--images-only" in sys.argv
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+
+    # Suporta --player "Nume": descarca DOAR jucatorul respectiv (override rapid)
+    player_only = None
+    for i, a in enumerate(sys.argv):
+        if a == "--player" and i + 1 < len(sys.argv):
+            player_only = sys.argv[i + 1]
+            break
+    if player_only:
+        images_only = True  # --player implica --images-only
+
+    args = [a for a in sys.argv[1:] if not a.startswith("--") and a != player_only]
 
     if not args and not images_only:
         print("=" * 55)
@@ -1422,7 +1452,8 @@ def main():
             return
 
     # 2. Download imagini de pe SoFIFA
-    asyncio.run(download_all_images(data, images_only=images_only))
+    asyncio.run(download_all_images(data, images_only=images_only,
+                                    player_only=player_only))
 
     # 3. Curata img_src din data.json final (nu e nevoie in AE)
     for group in [data["home"]["players"], data["away"]["players"],

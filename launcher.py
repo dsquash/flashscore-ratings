@@ -913,17 +913,17 @@ class App(tk.Tk):
 
         # ── Treeview ───────────────────────────────────────────────
         cols = ("group", "name", "kit", "sofifa_url", "override")
-        tree = ttk.Treeview(win, columns=cols, show="headings", height=16)
+        tree = ttk.Treeview(win, columns=cols, show="headings", height=14)
         tree.heading("group",      text="Group")
         tree.heading("name",       text="Player")
         tree.heading("kit",        text="Kit")
         tree.heading("sofifa_url", text="SoFIFA URL (detected)")
-        tree.heading("override",   text="Override set?")
+        tree.heading("override",   text="Override?")
         tree.column("group",      width=90,  anchor="w", stretch=False)
-        tree.column("name",       width=140, anchor="w")
-        tree.column("kit",        width=40,  anchor="center", stretch=False)
-        tree.column("sofifa_url", width=420, anchor="w")
-        tree.column("override",   width=90,  anchor="center", stretch=False)
+        tree.column("name",       width=150, anchor="w", stretch=False)
+        tree.column("kit",        width=38,  anchor="center", stretch=False)
+        tree.column("sofifa_url", width=430, anchor="w")
+        tree.column("override",   width=80,  anchor="center", stretch=False)
 
         sb = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
@@ -942,10 +942,10 @@ class App(tk.Tk):
             overrides_now.update(overrides_fresh)
 
             groups = [
-                (data.get("home", {}).get("players", []),     "Home starter"),
-                (data.get("home", {}).get("substitutes", []), "Home sub"),
-                (data.get("away", {}).get("players", []),     "Away starter"),
-                (data.get("away", {}).get("substitutes", []), "Away sub"),
+                ("Home starter", data.get("home", {}).get("players",     [])),
+                ("Home sub",     data.get("home", {}).get("substitutes", [])),
+                ("Away starter", data.get("away", {}).get("players",     [])),
+                ("Away sub",     data.get("away", {}).get("substitutes", [])),
             ]
             for group_label, players in groups:
                 for p in players:
@@ -964,22 +964,29 @@ class App(tk.Tk):
         populate_tree()
 
         # ── Override editor ────────────────────────────────────────
-        edit_frame = make_frame(win)
-        edit_frame.pack(fill="x", padx=16, pady=(0, 4))
+        edit_outer = make_frame(win, card=True)
+        edit_outer.pack(fill="x", padx=16, pady=(0, 4))
+        edit_frame = make_frame(edit_outer, card=True)
+        edit_frame.pack(fill="x", padx=12, pady=10)
 
-        make_label(edit_frame, "Player:", variant="dim").grid(row=0, column=0, sticky="w", padx=(0, 6))
-        sel_name_var = tk.StringVar(value="(select a row above)")
-        sel_lbl = make_label(edit_frame, "", variant="dim", anchor="w", width=22)
+        # Rând 1: player selecționat
+        row1 = make_frame(edit_frame, card=True)
+        row1.pack(fill="x", pady=(0, 6))
+        make_label(row1, "Selected:", variant="card-dim").pack(side="left", padx=(0, 8))
+        sel_name_var = tk.StringVar(value="← Select a player from the list above")
+        sel_lbl = make_label(row1, "", variant="card-dim", anchor="w")
         sel_lbl.configure(textvariable=sel_name_var)
-        try: sel_lbl.configure(foreground=FG)
+        try: sel_lbl.configure(foreground=ACCENT)
         except Exception: pass
-        sel_lbl.grid(row=0, column=1, sticky="w", padx=(0, 12))
+        sel_lbl.pack(side="left", fill="x", expand=True)
 
-        make_label(edit_frame, "New SoFIFA URL:", variant="dim").grid(row=0, column=2, sticky="w", padx=(0, 6))
+        # Rând 2: URL + butoane
+        row2 = make_frame(edit_frame, card=True)
+        row2.pack(fill="x")
+        make_label(row2, "New SoFIFA URL:", variant="card-dim").pack(side="left", padx=(0, 8))
         new_url_var = tk.StringVar()
-        url_entry = make_entry(edit_frame, textvariable=new_url_var, width=40)
-        url_entry.grid(row=0, column=3, sticky="ew", padx=(0, 8))
-        edit_frame.columnconfigure(3, weight=1)
+        url_entry = make_entry(row2, textvariable=new_url_var)
+        url_entry.pack(side="left", fill="x", expand=True, ipady=(2 if IS_MAC else 4))
 
         def on_select(event=None):
             sel = tree.selection()
@@ -987,7 +994,6 @@ class App(tk.Tk):
                 return
             vals = tree.item(sel[0], "values")
             sel_name_var.set(vals[1] if vals else "")
-            # Pre-fill with current sofifa_url if it looks like a real URL
             current_url = vals[3] if vals and vals[3] != "—" else ""
             new_url_var.set(current_url)
 
@@ -1002,20 +1008,19 @@ class App(tk.Tk):
         def do_save_override():
             name = sel_name_var.get().strip()
             url  = new_url_var.get().strip()
-            if not name or name == "(select a row above)":
+            if not name or name.startswith("←"):
                 return
-            if not url:
+            if not url or not url.startswith("http"):
                 return
             ov = self._load_overrides()
             ov[name] = url
             self._save_overrides(ov)
             populate_tree()
             self._log(f"  Override saved: '{name}' → {url}\n")
-            new_url_var.set("")
 
         def do_delete_override():
             name = sel_name_var.get().strip()
-            if not name or name == "(select a row above)":
+            if not name or name.startswith("←"):
                 return
             ov = self._load_overrides()
             if name in ov:
@@ -1024,12 +1029,12 @@ class App(tk.Tk):
                 populate_tree()
                 self._log(f"  Override removed: '{name}'\n")
 
-        make_button(edit_frame, text="Paste", command=do_paste, kind="small"
-                    ).grid(row=0, column=4, padx=(0, 4))
-        make_button(edit_frame, text="Save Override", command=do_save_override, kind="primary"
-                    ).grid(row=0, column=5, padx=(0, 4))
-        make_button(edit_frame, text="Remove Override", command=do_delete_override, kind="danger"
-                    ).grid(row=0, column=6)
+        make_button(row2, text="Paste", command=do_paste, kind="small"
+                    ).pack(side="left", padx=(8, 4))
+        make_button(row2, text="Save Override", command=do_save_override, kind="primary"
+                    ).pack(side="left", padx=(0, 4))
+        make_button(row2, text="Remove", command=do_delete_override, kind="danger"
+                    ).pack(side="left")
 
         # ── Bottom buttons ─────────────────────────────────────────
         btn_row2 = make_frame(win)

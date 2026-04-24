@@ -881,7 +881,7 @@ class App(tk.Tk):
     # ── Player Photos window ──────────────────────────────────────
 
     def _open_player_photos(self):
-        """Fereastra cu URL-urile SoFIFA detectate per jucator + override rapid."""
+        """Fereastra cu jucatorii din meciul curent + override URL SoFIFA."""
         data_path = BASE_DIR / "flashscore_output" / "data.json"
         if not data_path.exists():
             import tkinter.messagebox as mb
@@ -899,25 +899,31 @@ class App(tk.Tk):
         win = tk.Toplevel(self)
         win.title("Player SoFIFA URLs")
         win.configure(bg=BG)
-        win.geometry("860x600")
+        win.geometry("880x620")
         win.resizable(True, True)
         win.grab_set()
 
+        # ── Header ────────────────────────────────────────────────
         match_info = data.get("match", {})
-        title_text = (f"{match_info.get('home_team','')}  {match_info.get('home_score','')} - "
-                      f"{match_info.get('away_score','')}  {match_info.get('away_team','')}")
+        title_text = (f"{match_info.get('home_team','')}  "
+                      f"{match_info.get('home_score','')} - "
+                      f"{match_info.get('away_score','')}  "
+                      f"{match_info.get('away_team','')}")
         make_label(win, title_text, variant="dim").pack(anchor="w", padx=16, pady=(12, 2))
         make_label(win,
-                   "Select a player → paste new SoFIFA URL → Save Override.  Then click Redownload Photos.",
-                   variant="footer").pack(anchor="w", padx=16, pady=(0, 6))
+                   "Click a player → paste SoFIFA URL → Save Override → Redownload Photos",
+                   variant="footer").pack(anchor="w", padx=16, pady=(0, 8))
 
-        # ── Treeview ───────────────────────────────────────────────
+        # ── Treeview — creat direct in frame ──────────────────────
+        tree_frame = make_frame(win, card=True)
+        tree_frame.pack(fill="both", expand=True, padx=16, pady=(0, 6))
+
         cols = ("group", "name", "kit", "sofifa_url", "override")
-        tree = ttk.Treeview(win, columns=cols, show="headings", height=14)
+        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=14)
         tree.heading("group",      text="Group")
         tree.heading("name",       text="Player")
         tree.heading("kit",        text="Kit")
-        tree.heading("sofifa_url", text="SoFIFA URL (detected)")
+        tree.heading("sofifa_url", text="SoFIFA URL (detected / override)")
         tree.heading("override",   text="Override?")
         tree.column("group",      width=90,  anchor="w", stretch=False)
         tree.column("name",       width=150, anchor="w", stretch=False)
@@ -925,128 +931,137 @@ class App(tk.Tk):
         tree.column("sofifa_url", width=430, anchor="w")
         tree.column("override",   width=80,  anchor="center", stretch=False)
 
-        sb = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
+        sb = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y", padx=(0, 4), pady=4)
+        tree.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
 
-        tree_frame = make_frame(win, card=True)
-        tree_frame.pack(fill="both", expand=True, padx=16, pady=(0, 4))
-        tree.pack(in_=tree_frame, side="left", fill="both", expand=True, padx=(4, 0), pady=4)
-        sb.pack(in_=tree_frame, side="right", fill="y", pady=4)
-
-        overrides_now = self._load_overrides()
-
+        # ── Populeaza treeview ─────────────────────────────────────
         def populate_tree():
             tree.delete(*tree.get_children())
-            overrides_fresh = self._load_overrides()
-            overrides_now.clear()
-            overrides_now.update(overrides_fresh)
+            ov_fresh = self._load_overrides()
 
-            groups = [
+            groups_def = [
                 ("Home starter", data.get("home", {}).get("players",     [])),
                 ("Home sub",     data.get("home", {}).get("substitutes", [])),
                 ("Away starter", data.get("away", {}).get("players",     [])),
                 ("Away sub",     data.get("away", {}).get("substitutes", [])),
             ]
-            for group_label, players in groups:
+            for group_label, players in groups_def:
+                if not isinstance(players, list):
+                    continue
                 for p in players:
+                    if not isinstance(p, dict):
+                        continue
                     pname = p.get("name", "")
                     kit   = p.get("number", "")
                     surl  = p.get("sofifa_url", "")
-                    # Verifica daca e override setat (dupa nume)
-                    has_ov = any(pname and (
-                        pname.lower() == fs.lower() or
-                        pname.lower().rstrip('.').rstrip() in fs.lower()
-                    ) for fs in overrides_fresh)
-                    ov_label = "✓ YES" if has_ov else ""
-                    tree.insert("", "end",
-                                values=(group_label, pname, kit, surl or "—", ov_label))
+                    # Verifica daca exista override (comparatie case-insensitive)
+                    pnorm = pname.lower().strip()
+                    has_ov = any(pnorm == fs.lower().strip() for fs in ov_fresh)
+                    if not has_ov:
+                        # Incearca si varianta fara initiala
+                        pnorm2 = re.sub(r'\s+[a-z]\.?$', '', pnorm).strip()
+                        has_ov = any(pnorm2 == fs.lower().strip() for fs in ov_fresh)
+                    # Daca are override activ, arata URL-ul din override
+                    if has_ov:
+                        for fs, fu in ov_fresh.items():
+                            if fs.lower().strip() in (pnorm, re.sub(r'\s+[a-z]\.?$','',pnorm).strip()):
+                                surl = fu
+                                break
+                    tree.insert("", "end", values=(
+                        group_label, pname, kit, surl or "— (run Full Run to detect)", "✓" if has_ov else ""
+                    ))
 
         populate_tree()
 
         # ── Override editor ────────────────────────────────────────
-        edit_outer = make_frame(win, card=True)
-        edit_outer.pack(fill="x", padx=16, pady=(0, 4))
-        edit_frame = make_frame(edit_outer, card=True)
-        edit_frame.pack(fill="x", padx=12, pady=10)
+        edit_frame = make_frame(win, card=True)
+        edit_frame.pack(fill="x", padx=16, pady=(0, 4))
+        inner = make_frame(edit_frame, card=True)
+        inner.pack(fill="x", padx=12, pady=10)
 
-        # Rând 1: player selecționat
-        row1 = make_frame(edit_frame, card=True)
-        row1.pack(fill="x", pady=(0, 6))
-        make_label(row1, "Selected:", variant="card-dim").pack(side="left", padx=(0, 8))
-        sel_name_var = tk.StringVar(value="← Select a player from the list above")
-        sel_lbl = make_label(row1, "", variant="card-dim", anchor="w")
-        sel_lbl.configure(textvariable=sel_name_var)
-        try: sel_lbl.configure(foreground=ACCENT)
+        # Rând 1: jucator selectat
+        r1 = make_frame(inner, card=True)
+        r1.pack(fill="x", pady=(0, 6))
+        make_label(r1, "Player:", variant="card-dim").pack(side="left", padx=(0, 8))
+        sel_name_var = tk.StringVar(value="← click a player above")
+        lbl_sel = make_label(r1, "", variant="card-dim")
+        lbl_sel.configure(textvariable=sel_name_var)
+        try: lbl_sel.configure(foreground=ACCENT)
         except Exception: pass
-        sel_lbl.pack(side="left", fill="x", expand=True)
+        lbl_sel.pack(side="left")
 
         # Rând 2: URL + butoane
-        row2 = make_frame(edit_frame, card=True)
-        row2.pack(fill="x")
-        make_label(row2, "New SoFIFA URL:", variant="card-dim").pack(side="left", padx=(0, 8))
+        r2 = make_frame(inner, card=True)
+        r2.pack(fill="x")
+        make_label(r2, "SoFIFA URL:", variant="card-dim").pack(side="left", padx=(0, 8))
         new_url_var = tk.StringVar()
-        url_entry = make_entry(row2, textvariable=new_url_var)
-        url_entry.pack(side="left", fill="x", expand=True, ipady=(2 if IS_MAC else 4))
+        url_entry = make_entry(r2, textvariable=new_url_var)
+        url_entry.pack(side="left", fill="x", expand=True,
+                       ipady=(2 if IS_MAC else 4), padx=(0, 8))
 
-        def on_select(event=None):
+        def on_tree_select(event=None):
             sel = tree.selection()
             if not sel:
                 return
             vals = tree.item(sel[0], "values")
-            sel_name_var.set(vals[1] if vals else "")
-            current_url = vals[3] if vals and vals[3] != "—" else ""
-            new_url_var.set(current_url)
+            if not vals:
+                return
+            pname = vals[1]
+            surl  = vals[3]
+            sel_name_var.set(pname)
+            # Pre-fill URL daca e real (nu placeholder)
+            if surl and not surl.startswith("—"):
+                new_url_var.set(surl)
+            else:
+                new_url_var.set("")
 
-        tree.bind("<<TreeviewSelect>>", on_select)
+        tree.bind("<<TreeviewSelect>>", on_tree_select)
 
         def do_paste():
-            try:
-                new_url_var.set(win.clipboard_get().strip())
-            except Exception:
-                pass
+            try: new_url_var.set(win.clipboard_get().strip())
+            except Exception: pass
 
-        def do_save_override():
+        def do_save():
             name = sel_name_var.get().strip()
             url  = new_url_var.get().strip()
-            if not name or name.startswith("←"):
-                return
-            if not url or not url.startswith("http"):
-                return
+            if not name or name.startswith("←"): return
+            if not url or not url.startswith("http"): return
             ov = self._load_overrides()
             ov[name] = url
             self._save_overrides(ov)
             populate_tree()
             self._log(f"  Override saved: '{name}' → {url}\n")
 
-        def do_delete_override():
+        def do_remove():
             name = sel_name_var.get().strip()
-            if not name or name.startswith("←"):
-                return
+            if not name or name.startswith("←"): return
             ov = self._load_overrides()
-            if name in ov:
-                del ov[name]
+            removed = False
+            for k in list(ov.keys()):
+                if k.lower().strip() == name.lower().strip():
+                    del ov[k]; removed = True
+            if removed:
                 self._save_overrides(ov)
                 populate_tree()
                 self._log(f"  Override removed: '{name}'\n")
 
-        make_button(row2, text="Paste", command=do_paste, kind="small"
-                    ).pack(side="left", padx=(8, 4))
-        make_button(row2, text="Save Override", command=do_save_override, kind="primary"
-                    ).pack(side="left", padx=(0, 4))
-        make_button(row2, text="Remove", command=do_delete_override, kind="danger"
-                    ).pack(side="left")
+        make_button(r2, text="Paste", command=do_paste, kind="small").pack(side="left", padx=(0, 4))
+        make_button(r2, text="Save Override", command=do_save, kind="primary").pack(side="left", padx=(0, 4))
+        make_button(r2, text="Remove Override", command=do_remove, kind="danger").pack(side="left")
 
-        # ── Bottom buttons ─────────────────────────────────────────
-        btn_row2 = make_frame(win)
-        btn_row2.pack(fill="x", padx=16, pady=(0, 12))
+        # ── Butoane jos ────────────────────────────────────────────
+        bot = make_frame(win)
+        bot.pack(fill="x", padx=16, pady=(0, 12))
 
         def do_redownload():
             win.destroy()
             self._run_redownload()
 
-        make_button(btn_row2, text="⬇  Redownload Photos (uses overrides)",
+        make_button(bot, text="⬇  Redownload Photos",
                     command=do_redownload, kind="secondary").pack(side="left")
-        make_button(btn_row2, text="Close", command=win.destroy,
+        make_button(bot, text="Close", command=win.destroy,
                     kind="default").pack(side="right")
 
     # ── Stop ──────────────────────────────────────────────────────

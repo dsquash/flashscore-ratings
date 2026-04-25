@@ -1078,7 +1078,8 @@ async def fetch_from_roster(name: str, roster: list, page,
     except Exception as e:
         print(f"[search exc: {e}]", end=" ", flush=True)
 
-    return None, '', None, ''
+    # Pastreaza kit-ul gasit (din roster / pagina jucatorului) chiar daca poza a esuat
+    return None, kit, None, (best.get('playerUrl', '') if best else '')
 
 def generate_placeholder(name: str, dest: Path) -> bool:
     """
@@ -1314,6 +1315,23 @@ async def download_all_images(data: dict, images_only: bool = False,
                     if player_only and dest.exists():
                         dest.unlink(missing_ok=True)
                         is_placeholder = False
+
+                    # ── Kit din roster (merge si pt poze cached) ─────────────
+                    # Rezervele nu au numar de pe Flashscore — updatam din roster
+                    # chiar daca poza e deja in cache, ca sa nu piarda kit-ul.
+                    if not p.get("number"):
+                        _c  = clean_name_for_check
+                        _ni = clean_no_init_check
+                        _bk, _bs = '', 0.0
+                        for _rp in roster:
+                            _sc = max(
+                                _name_match(_c,  _rp['name']),
+                                _name_match(_ni, _rp['name']) if _ni != _c else 0
+                            )
+                            if _sc > _bs:
+                                _bs, _bk = _sc, _rp.get('kit', '')
+                        if _bk and _bs >= 0.3:
+                            p["number"] = _bk
 
                     # Sare peste cache daca:
                     # - fisierul nu exista (normal)

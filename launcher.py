@@ -171,12 +171,6 @@ class App(_BASE_CLS):
                                    font=(UI, 13))
         self.url_entry.pack(side="left", fill="x", expand=True, ipady=4)
 
-        ttk.Button(entry_row, text="Paste", command=self._paste_url,
-                   **self._btn_kw("light")).pack(side="left", padx=(8, 0))
-        ttk.Button(entry_row, text="Clear",
-                   command=lambda: self.url_var.set(""),
-                   **self._btn_kw("light")).pack(side="left", padx=(4, 0))
-
         # ── Match type ────────────────────────────────────────────
         type_row = ttk.Frame(root, padding=(PAD, PAD_S, PAD, 0))
         type_row.pack(fill="x")
@@ -208,12 +202,6 @@ class App(_BASE_CLS):
                                       **self._btn_kw("primary"))
         self.btn_refresh.pack(side="left", padx=(10, 0), ipadx=4, ipady=4)
 
-        self.btn_stop = ttk.Button(primary_row, text="■  Stop",
-                                   command=self._stop,
-                                   **self._btn_kw("danger-outline" if _BOOT else "danger"))
-        self.btn_stop.pack(side="right", ipadx=4, ipady=4)
-        self.btn_stop.state(["disabled"])
-
         # ── Secondary actions ─────────────────────────────────────
         sec_row = ttk.Frame(root, padding=(PAD, PAD_S, PAD, 0))
         sec_row.pack(fill="x")
@@ -232,11 +220,6 @@ class App(_BASE_CLS):
                    command=self._open_overrides,
                    **self._btn_kw("secondary-outline" if _BOOT else "secondary")
                    ).pack(side="left", padx=(8, 0))
-
-        self.btn_reset = ttk.Button(sec_row, text="🗑  Reset",
-                                    command=self._confirm_reset,
-                                    **self._btn_kw("danger-outline" if _BOOT else "danger"))
-        self.btn_reset.pack(side="right")
 
         # ── Status bar ────────────────────────────────────────────
         self.status_var = tk.StringVar(value="Ready.")
@@ -342,11 +325,9 @@ class App(_BASE_CLS):
 
     def _set_running(self, running: bool):
         self._running = running
-        normal = ["!disabled"]
-        disabled = ["disabled"]
-        for w in (self.btn_run, self.btn_refresh, self.btn_redownload, self.btn_reset):
-            w.state(disabled if running else normal)
-        self.btn_stop.state(normal if running else disabled)
+        state = ["disabled"] if running else ["!disabled"]
+        for w in (self.btn_run, self.btn_refresh, self.btn_redownload):
+            w.state(state)
         if not running:
             self.status_var.set("Ready.")
 

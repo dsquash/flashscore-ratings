@@ -112,7 +112,7 @@ if (typeof JSON.stringify !== "function") {
     if (match.away_avg_rating)
         setRatingSlider(AWAY_RATING_COMP, AWAY_RATING_LAYER, parseFloat(match.away_avg_rating));
 
-    // ── 4. Update player stats (selective — only if changed) ──────
+    // ── 4. Update player stats + kit numbers ──────────────────────
     var groups = [
         { list: data.home.players,      prefix: "home_player_", isSub: false },
         { list: data.home.substitutes,  prefix: "home_sub_",    isSub: true  },
@@ -121,15 +121,19 @@ if (typeof JSON.stringify !== "function") {
     ];
 
     var unchanged = 0;
+    var kitsUpdated = 0;
 
     for (var g = 0; g < groups.length; g++) {
         var grp = groups[g];
         for (var p = 0; p < grp.list.length; p++) {
             var player = grp.list[p];
-            var id     = grp.prefix + (p + 1);
-            var statsCompName = "Stats_" + id;
+            var idx    = p + 1;
+            // Suporta atat "home_player_1" cat si "home_player_01" (zero-padded din populate_lineup)
+            var id       = grp.prefix + idx;
+            var idPad    = grp.prefix + (idx < 10 ? "0" + idx : idx);
 
-            var statsComp = findCompByName(statsCompName);
+            var statsComp = findCompByName("Stats_" + id)
+                         || findCompByName("Stats_" + idPad);
             if (!statsComp) { skipped++; continue; }
 
             var ctrl = findLayerIn(statsComp, CTRL_LAYER);
@@ -137,11 +141,23 @@ if (typeof JSON.stringify !== "function") {
 
             if (!playerNeedsUpdate(ctrl, player, grp.isSub)) {
                 unchanged++;
-                continue;
+            } else {
+                refreshPlayerStats(ctrl, player, grp.isSub);
+                updated++;
             }
 
-            refreshPlayerStats(ctrl, player, grp.isSub);
-            updated++;
+            // ── Kit number: actualizeaza intotdeauna layer-ul "1" din PT comp ────
+            if (player.number !== undefined && player.number !== null) {
+                var ptComp = findCompByName("PT_" + id)
+                          || findCompByName("PT_" + idPad);
+                if (ptComp) {
+                    var numLyr = findLayerIn(ptComp, "1");
+                    if (numLyr) {
+                        setTxtLayer(numLyr, String(player.number || ""));
+                        kitsUpdated++;
+                    }
+                }
+            }
         }
     }
 
@@ -150,7 +166,9 @@ if (typeof JSON.stringify !== "function") {
     var msg = "\u2713 Refresh complete!\n\n";
     msg += "\u2022 Score: " + scoreStr + "\n";
     msg += "\u2022 Avg: " + (match.home_avg_rating || "?") + " / " + (match.away_avg_rating || "?") + "\n";
-    msg += "\u2022 Player stats updated: " + updated + "\n";
+    msg += "\u2022 Stats updated: " + updated + "\n";
+    if (kitsUpdated > 0)
+        msg += "\u2022 Kit numbers synced: " + kitsUpdated + "\n";
     if (unchanged > 0)
         msg += "\u2022 Unchanged (skipped): " + unchanged + "\n";
     if (skipped > 0)

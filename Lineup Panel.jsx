@@ -163,6 +163,53 @@
         return null;
     }
 
+    // ── Helper: gaseste calea executabilului AME (Beta preferat) ─
+    function _findAMEPath(isMac) {
+        if (isMac) {
+            // Cauta foldere AME in /Applications, sortat Beta-first
+            var appsFolder = new Folder("/Applications");
+            if (!appsFolder.exists) return "";
+            var ameApps = appsFolder.getFiles(function(f) {
+                return f instanceof Folder &&
+                       f.name.toLowerCase().indexOf("adobe media encoder") >= 0;
+            });
+            ameApps.sort(function(a, b) {
+                var aB = a.name.toLowerCase().indexOf("beta") >= 0 ? 0 : 1;
+                var bB = b.name.toLowerCase().indexOf("beta") >= 0 ? 0 : 1;
+                return aB - bB;
+            });
+            for (var _i = 0; _i < ameApps.length; _i++) {
+                // Cauta .app bundle in subfolder
+                var _inner = ameApps[_i].getFiles(function(f) {
+                    return f instanceof Folder && f.name.slice(-4) === ".app";
+                });
+                if (_inner.length > 0) return _inner[0].fsName;
+                return ameApps[_i].fsName;
+            }
+            return "";
+        } else {
+            // Windows: C:\Program Files\Adobe\Adobe Media Encoder*
+            var adobeFolder = new Folder("C:/Program Files/Adobe");
+            if (!adobeFolder.exists) return "";
+            var ameFolders = adobeFolder.getFiles(function(f) {
+                return f instanceof Folder &&
+                       f.name.toLowerCase().indexOf("adobe media encoder") >= 0;
+            });
+            ameFolders.sort(function(a, b) {
+                var aB = a.name.toLowerCase().indexOf("beta") >= 0 ? 0 : 1;
+                var bB = b.name.toLowerCase().indexOf("beta") >= 0 ? 0 : 1;
+                return aB - bB;
+            });
+            for (var _j = 0; _j < ameFolders.length; _j++) {
+                var _exe = new File(ameFolders[_j].fsName + "/Adobe Media Encoder.exe");
+                if (_exe.exists) return _exe.fsName;
+                var _sf  = new File(ameFolders[_j].fsName + "/Support Files/Adobe Media Encoder.exe");
+                if (_sf.exists)  return _sf.fsName;
+            }
+            return "";
+        }
+    }
+
     // ── Helper: adauga comp in Adobe Media Encoder ────────────
     function addToMediaEncoder() {
         var comp = findMatchComp();
@@ -177,52 +224,75 @@
             }
         }
 
-        try {
-            if (!app.encoder) {
-                alert("Adobe Media Encoder is not available.\n" +
-                      "Make sure AME is installed and the version matches AE.");
-                return;
+        // ── Cauta preset-ul .epr dupa nume ───────────────────
+        var presetPath = "";
+        if (AME_PRESET_NAME !== "") {
+            var _pname = AME_PRESET_NAME + ".epr";
+            var _f1 = new File(dir + "/" + _pname);
+            if (_f1.exists) { presetPath = _f1.fsName; }
+            if (!presetPath) {
+                var _f2 = new File(Folder.userData.fsName + "/Adobe/Common/AMEPresets/" + _pname);
+                if (_f2.exists) { presetPath = _f2.fsName; }
             }
-
-            // ── Cauta preset-ul .epr dupa nume ───────────────────
-            var presetPath = "";
-            if (AME_PRESET_NAME !== "") {
-                var _pname = AME_PRESET_NAME + ".epr";
-                // 1. Acelasi folder cu panelul
-                var _f1 = new File(dir + "/" + _pname);
-                if (_f1.exists) { presetPath = _f1.fsName; }
-                // 2. AppData\Roaming\Adobe\Common\AMEPresets (Windows)
-                if (!presetPath) {
-                    var _f2 = new File(Folder.userData.fsName + "/Adobe/Common/AMEPresets/" + _pname);
-                    if (_f2.exists) { presetPath = _f2.fsName; }
+            if (!presetPath) {
+                var _home2 = $.getenv("HOME") || "";
+                if (_home2) {
+                    var _f3 = new File(_home2 + "/Library/Application Support/Adobe/Common/AMEPresets/" + _pname);
+                    if (_f3.exists) { presetPath = _f3.fsName; }
                 }
-                // 3. Mac: ~/Library/Application Support/Adobe/Common/AMEPresets
-                if (!presetPath) {
-                    var _home2 = $.getenv("HOME") || "";
-                    if (_home2) {
-                        var _f3 = new File(_home2 + "/Library/Application Support/Adobe/Common/AMEPresets/" + _pname);
-                        if (_f3.exists) { presetPath = _f3.fsName; }
+            }
+            if (!presetPath) {
+                var _ameRoot = new Folder(Folder.userData.fsName + "/Adobe/Common/AMEPresets");
+                presetPath = _findEprRecursive(_ameRoot, _pname);
+            }
+            if (!presetPath) {
+                statusTxt.text = "Preset '" + AME_PRESET_NAME + "' not found, adding without preset...";
+            }
+        }
+
+        var isMac = ($.os.toLowerCase().indexOf("mac") >= 0);
+        var ok    = false;
+
+        // ── Attempt 1: standard app.encoder API ──────────────
+        if (app.encoder) {
+            try {
+                app.encoder.launchEncoder();
+                app.encoder.encodeComp(comp, presetPath, "");
+                statusTxt.text = "\u2713 AME: " + comp.name +
+                                 (presetPath ? " [" + AME_PRESET_NAME + "]" : " [no preset]");
+                ok = true;
+            } catch(e1) { /* fall through */ }
+        }
+
+        // ── Attempt 2: launch AME from disk (Beta-first), retry ─
+        if (!ok) {
+            var amePath = _findAMEPath(isMac);
+            if (amePath) {
+                try {
+                    if (isMac) {
+                        system.callSystem('open -a "' + amePath + '"');
+                    } else {
+                        system.callSystem('cmd /c start "" "' + amePath.replace(/\//g, "\\") + '"');
                     }
-                }
-                // 4. Cauta recursiv in AMEPresets (subdirectoare)
-                if (!presetPath) {
-                    var _ameRoot = new Folder(Folder.userData.fsName + "/Adobe/Common/AMEPresets");
-                    presetPath = _findEprRecursive(_ameRoot, _pname);
-                }
-                if (!presetPath) {
-                    statusTxt.text = "Preset '" + AME_PRESET_NAME + "' not found, adding without preset...";
-                }
+                    $.sleep(4000); // asteapta pornirea AME
+                    if (app.encoder) {
+                        try {
+                            app.encoder.launchEncoder();
+                            app.encoder.encodeComp(comp, presetPath, "");
+                            statusTxt.text = "\u2713 AME: " + comp.name +
+                                             (presetPath ? " [" + AME_PRESET_NAME + "]" : " [no preset]");
+                            ok = true;
+                        } catch(e2) { /* fall through */ }
+                    }
+                } catch(e3) { /* fall through */ }
             }
+        }
 
-            // Porneste AME daca nu e deschis deja
-            app.encoder.launchEncoder();
-            // Adauga in coada AME
-            app.encoder.encodeComp(comp, presetPath, "");
-            statusTxt.text = "\u2713 AME: " + comp.name + (presetPath ? " [" + AME_PRESET_NAME + "]" : " [no preset]");
-        } catch(e) {
-            var msg = (e.message || String(e));
-            statusTxt.text = "AME ERROR \u2014 " + msg;
-            alert("Media Encoder error:\n" + msg);
+        // ── Fallback: instructiuni manuale ────────────────────
+        if (!ok) {
+            statusTxt.text = "AME: open AME manually, then retry.";
+            alert("Could not connect to Adobe Media Encoder automatically.\n\n" +
+                  "Please open Media Encoder manually, then press Render again.");
         }
 
         try { panel.layout.layout(true); } catch(e) {}

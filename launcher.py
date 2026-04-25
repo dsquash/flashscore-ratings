@@ -870,21 +870,64 @@ class App(_BASE_CLS):
 
         populate_tree()
 
-        # Override editor
-        edit_frame = ttk.LabelFrame(outer, text="Set Override URL", padding=PAD_S)
+        # ── Editor ────────────────────────────────────────────────
+        edit_frame = ttk.LabelFrame(outer, text="Edit Player Data", padding=PAD_S)
         edit_frame.pack(fill="x", pady=(0, PAD_S))
 
+        # Row 1: player name label
         r1 = ttk.Frame(edit_frame)
         r1.pack(fill="x", pady=(0, 6))
         ttk.Label(r1, text="Player:", font=(UI, 11)).pack(side="left", padx=(0, 8))
         sel_name_var = tk.StringVar(value="← click a player above")
-        lbl_sel = ttk.Label(r1, textvariable=sel_name_var, font=(UI, 11, "bold"),
-                            foreground="#0a84ff")
-        lbl_sel.pack(side="left")
+        ttk.Label(r1, textvariable=sel_name_var, font=(UI, 11, "bold"),
+                  foreground="#0a84ff").pack(side="left")
 
+        # Row 2: Kit number
+        r_kit = ttk.Frame(edit_frame)
+        r_kit.pack(fill="x", pady=(0, 6))
+        ttk.Label(r_kit, text="Kit #:", font=(UI, 11), width=10,
+                  anchor="w").pack(side="left", padx=(0, 8))
+        kit_var = tk.StringVar()
+        ttk.Entry(r_kit, textvariable=kit_var, font=(UI, 11),
+                  width=6).pack(side="left", ipady=3, padx=(0, 8))
+
+        def do_save_kit():
+            name = sel_name_var.get().strip()
+            kit  = kit_var.get().strip()
+            if not name or name.startswith("←"): return
+            # Update in-memory data dict and data.json
+            all_grps = [
+                data.get("home", {}).get("players", []),
+                data.get("home", {}).get("substitutes", []),
+                data.get("away", {}).get("players", []),
+                data.get("away", {}).get("substitutes", []),
+            ]
+            found = False
+            for grp in all_grps:
+                for p in grp:
+                    if isinstance(p, dict) and _norm(p.get("name", "")) == _norm(name):
+                        p["number"] = kit
+                        found = True
+            if not found:
+                self._log(f"  ⚠ Player '{name}' not found in data.json\n")
+                return
+            dpath = BASE_DIR / "flashscore_output" / "data.json"
+            try:
+                with open(dpath, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                self._log(f"  ✓ Kit saved: '{name}' → #{kit}\n")
+                populate_tree()
+            except Exception as e:
+                self._log(f"  ⚠ Cannot save data.json: {e}\n")
+
+        ttk.Button(r_kit, text="Save Kit #", command=do_save_kit,
+                   **self._btn_kw("primary")).pack(side="left")
+
+        # Row 3: SoFIFA URL
         r2 = ttk.Frame(edit_frame)
         r2.pack(fill="x")
-        ttk.Label(r2, text="SoFIFA URL:", font=(UI, 11)).pack(side="left", padx=(0, 8))
+        ttk.Label(r2, text="SoFIFA URL:", font=(UI, 11), width=10,
+                  anchor="w").pack(side="left", padx=(0, 8))
         new_url_var = tk.StringVar()
         ttk.Entry(r2, textvariable=new_url_var, font=(UI, 11)
                   ).pack(side="left", fill="x", expand=True, ipady=3, padx=(0, 8))
@@ -895,6 +938,8 @@ class App(_BASE_CLS):
             vals = tree.item(sel[0], "values")
             if not vals: return
             sel_name_var.set(vals[1])
+            # vals: (group, name, kit, sofifa_url, override?)
+            kit_var.set(vals[2] if vals[2] and vals[2] != "—" else "")
             surl = vals[3]
             new_url_var.set(surl if surl and not surl.startswith("—") else "")
 

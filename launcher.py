@@ -77,6 +77,11 @@ def write_match_type(match_type: str):
         pass
 
 
+def _norm(s: str) -> str:
+    """Normalizare nume pentru comparatie."""
+    return s.lower().strip()
+
+
 def _load_overrides() -> dict:
     if not OVERRIDES.exists():
         return {}
@@ -424,6 +429,7 @@ class App(_BASE_CLS):
                 self.after(0, self._update_missing_banner, collected_missing)
                 if is_refresh and rc == 0:
                     self.after(200, self._show_refresh_summary)
+                    self.after(600, self._try_refresh_ae_comps)
             except Exception as e:
                 self.after(0, self._log, f"\nERROR: {e}\n")
                 self.after(0, self.status_var.set, f"ERROR: {e}")
@@ -472,6 +478,51 @@ class App(_BASE_CLS):
                 self.after(0, self._set_running, False)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ── Trigger AE comp refresh ───────────────────────────────────
+
+    def _try_refresh_ae_comps(self):
+        """Incearca sa ruleze refresh_comps.jsx in AE daca e deschis."""
+        script_path = str(BASE_DIR / "refresh_comps.jsx")
+        if IS_MAC:
+            ae_names = [
+                "Adobe After Effects (Beta)",
+                "Adobe After Effects 2025",
+                "Adobe After Effects 2024",
+                "Adobe After Effects 2023",
+                "Adobe After Effects",
+            ]
+            for ae_name in ae_names:
+                try:
+                    escaped = script_path.replace('"', '\\"')
+                    r = subprocess.run(
+                        ["osascript", "-e",
+                         f'tell application "{ae_name}" to do script "{escaped}"'],
+                        capture_output=True, timeout=8
+                    )
+                    if r.returncode == 0:
+                        self._log("  ✓ AE compositions updated via osascript.\n")
+                        return
+                except Exception:
+                    pass
+            self._log("  ℹ After Effects not detected — open the AE panel and press "
+                      "↻ Refresh Stats there to update compositions.\n")
+        elif IS_WIN:
+            updated = False
+            try:
+                import importlib
+                win32com = importlib.import_module("win32com.client")
+                ae = win32com.GetActiveObject("AfterEffects.Application")
+                ae.DoScript(script_path)
+                self._log("  ✓ AE compositions updated via COM.\n")
+                updated = True
+            except ImportError:
+                pass
+            except Exception:
+                pass
+            if not updated:
+                self._log("  ℹ After Effects not detected — open the AE panel and press "
+                          "↻ Refresh Stats there to update compositions.\n")
 
     # ── Refresh Stats summary ─────────────────────────────────────
 

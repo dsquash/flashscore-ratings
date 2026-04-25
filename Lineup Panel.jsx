@@ -14,10 +14,9 @@
 (function(thisObj) {
 
     // ── CONFIGURARE MEDIA ENCODER ─────────────────────────────────
-    // Numele exact al presetului din AME Preset Browser (fara extensie .epr).
-    // Codul il cauta automat in folderul AMEPresets din AppData.
-    // Lasa "" pentru a deschide AME fara preset.
-    var AME_PRESET_NAME = "Ratings Video";
+    // Cauta presetul H.265 instalat in AME (user presets sau system presets).
+    // Schimba AME_PRESET_NAME daca vrei alt preset. Lasa "" pentru fara preset.
+    var AME_PRESET_NAME = "H.265 1080p High Quality";
     // ─────────────────────────────────────────────────────────────
 
     var DEFAULT_DIR = "C:\\Users\\marug\\Desktop\\Task #1 - FlashScore folder\\_DO NOT TOUCH_";
@@ -210,6 +209,42 @@
         }
     }
 
+    // ── Helper: cauta .epr in user presets + system presets AME ─
+    function _findPreset(pname, amePath, isMac) {
+        var f;
+        // 1. Acelasi folder cu panelul
+        f = new File(dir + "/" + pname);
+        if (f.exists) return f.fsName;
+        // 2. Windows user presets: AppData\Roaming\Adobe\Common\AMEPresets
+        f = new File(Folder.userData.fsName + "/Adobe/Common/AMEPresets/" + pname);
+        if (f.exists) return f.fsName;
+        // 3. Mac user presets: ~/Library/Application Support/Adobe/Common/AMEPresets
+        var _h = $.getenv("HOME") || "";
+        if (_h) {
+            f = new File(_h + "/Library/Application Support/Adobe/Common/AMEPresets/" + pname);
+            if (f.exists) return f.fsName;
+        }
+        // 4. Recursiv in user AMEPresets
+        var found = _findEprRecursive(
+            new Folder(Folder.userData.fsName + "/Adobe/Common/AMEPresets"), pname);
+        if (found) return found;
+        // 5. System presets din folderul AME
+        if (amePath) {
+            var sysPresets = "";
+            if (isMac) {
+                sysPresets = amePath + "/Contents/Resources/MediaIO/presets";
+            } else {
+                var _tmp = amePath.replace(/\\/g, "/").replace(/\/[^\/]+\.exe$/i, "");
+                if (_tmp.toLowerCase().indexOf("support files") >= 0)
+                    _tmp = _tmp.replace(/\/[Ss]upport [Ff]iles$/, "");
+                sysPresets = _tmp + "/MediaIO/presets";
+            }
+            found = _findEprRecursive(new Folder(sysPresets), pname);
+            if (found) return found;
+        }
+        return "";
+    }
+
     // ── Helper: adauga comp in Adobe Media Encoder ────────────
     function addToMediaEncoder() {
         var comp = findMatchComp();
@@ -224,79 +259,74 @@
             }
         }
 
-        // ── Cauta preset-ul .epr dupa nume ───────────────────
+        var isMac     = ($.os.toLowerCase().indexOf("mac") >= 0);
+        var amePath   = _findAMEPath(isMac);
+        var outputDir = Folder.desktop.fsName; // export pe Desktop
+
+        // ── Step 1: lanseaza AME din disk mai intai (Beta-first) ─
+        if (amePath) {
+            try {
+                if (isMac) {
+                    system.callSystem('open -a "' + amePath + '"');
+                } else {
+                    system.callSystem('cmd /c start "" "' + amePath.replace(/\//g, "\\") + '"');
+                }
+                $.sleep(4000);
+            } catch(eLaunch) { /* ignora */ }
+        }
+
+        // ── Step 2: cauta preset H.265 ───────────────────────
         var presetPath = "";
         if (AME_PRESET_NAME !== "") {
-            var _pname = AME_PRESET_NAME + ".epr";
-            var _f1 = new File(dir + "/" + _pname);
-            if (_f1.exists) { presetPath = _f1.fsName; }
-            if (!presetPath) {
-                var _f2 = new File(Folder.userData.fsName + "/Adobe/Common/AMEPresets/" + _pname);
-                if (_f2.exists) { presetPath = _f2.fsName; }
+            var _candidates = [
+                AME_PRESET_NAME + ".epr",
+                "H.265 1080p High Quality.epr",
+                "H.265 4K Ultra HD.epr",
+                "H.265 720p High Quality.epr",
+                "H.265.epr"
+            ];
+            for (var _ci = 0; _ci < _candidates.length; _ci++) {
+                presetPath = _findPreset(_candidates[_ci], amePath, isMac);
+                if (presetPath) break;
             }
             if (!presetPath) {
-                var _home2 = $.getenv("HOME") || "";
-                if (_home2) {
-                    var _f3 = new File(_home2 + "/Library/Application Support/Adobe/Common/AMEPresets/" + _pname);
-                    if (_f3.exists) { presetPath = _f3.fsName; }
-                }
-            }
-            if (!presetPath) {
-                var _ameRoot = new Folder(Folder.userData.fsName + "/Adobe/Common/AMEPresets");
-                presetPath = _findEprRecursive(_ameRoot, _pname);
-            }
-            if (!presetPath) {
-                statusTxt.text = "Preset '" + AME_PRESET_NAME + "' not found, adding without preset...";
+                statusTxt.text = "H.265 preset not found — adding without preset...";
             }
         }
 
-        var isMac = ($.os.toLowerCase().indexOf("mac") >= 0);
-        var ok    = false;
-
-        // ── Attempt 1: standard app.encoder API ──────────────
+        // ── Step 3: adauga in coada AME ──────────────────────
+        var ok = false;
         if (app.encoder) {
             try {
                 app.encoder.launchEncoder();
-                app.encoder.encodeComp(comp, presetPath, "");
-                statusTxt.text = "\u2713 AME: " + comp.name +
-                                 (presetPath ? " [" + AME_PRESET_NAME + "]" : " [no preset]");
+                app.encoder.encodeComp(comp, presetPath, outputDir);
+                statusTxt.text = "\u2713 Added to AME: " + comp.name +
+                                 (presetPath ? " [H.265]" : " [no preset]") +
+                                 " \u2192 Desktop";
                 ok = true;
-            } catch(e1) { /* fall through */ }
-        }
-
-        // ── Attempt 2: launch AME from disk (Beta-first), retry ─
-        if (!ok) {
-            var amePath = _findAMEPath(isMac);
-            if (amePath) {
+            } catch(eEnc) {
+                $.sleep(3000);
                 try {
-                    if (isMac) {
-                        system.callSystem('open -a "' + amePath + '"');
-                    } else {
-                        system.callSystem('cmd /c start "" "' + amePath.replace(/\//g, "\\") + '"');
-                    }
-                    $.sleep(4000); // asteapta pornirea AME
-                    if (app.encoder) {
-                        try {
-                            app.encoder.launchEncoder();
-                            app.encoder.encodeComp(comp, presetPath, "");
-                            statusTxt.text = "\u2713 AME: " + comp.name +
-                                             (presetPath ? " [" + AME_PRESET_NAME + "]" : " [no preset]");
-                            ok = true;
-                        } catch(e2) { /* fall through */ }
-                    }
-                } catch(e3) { /* fall through */ }
+                    app.encoder.launchEncoder();
+                    app.encoder.encodeComp(comp, presetPath, outputDir);
+                    statusTxt.text = "\u2713 Added to AME: " + comp.name +
+                                     (presetPath ? " [H.265]" : " [no preset]") +
+                                     " \u2192 Desktop";
+                    ok = true;
+                } catch(eEnc2) { /* fall through */ }
             }
         }
 
-        // ── Fallback: instructiuni manuale ────────────────────
         if (!ok) {
-            statusTxt.text = "AME: open AME manually, then retry.";
-            alert("Could not connect to Adobe Media Encoder automatically.\n\n" +
-                  "Please open Media Encoder manually, then press Render again.");
+            statusTxt.text = "AME error \u2014 see alert.";
+            alert("Could not send to Media Encoder.\n\n" +
+                  "Make sure Adobe Media Encoder (or AME Beta) is installed.\n" +
+                  "Try opening AME manually first, then press Render again.");
         }
 
         try { panel.layout.layout(true); } catch(e) {}
     }
+
 
     // ── Helper: scrie MATCH_TYPE in run.py ───────────────────
     function setMatchType(matchType) {

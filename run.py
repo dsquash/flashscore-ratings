@@ -661,9 +661,38 @@ async def get_sofifa_team_roster(team_name: str, page) -> tuple:
     2. Viziteaza pagina echipei
     3. Returneaza (team_id, [{name, kit, photo_url, player_url}])
     """
+    # Common Flashscore short names → SoFIFA full names
+    _SOFIFA_TEAM_ALIASES = {
+        "psg": "Paris Saint-Germain",
+        "man city": "Manchester City",
+        "man utd": "Manchester United",
+        "man united": "Manchester United",
+        "man u": "Manchester United",
+        "spurs": "Tottenham Hotspur",
+        "inter": "Internazionale",
+        "inter milan": "Internazionale",
+        "newcastle": "Newcastle United",
+        "leicester": "Leicester City",
+        "brighton": "Brighton & Hove Albion",
+        "west ham": "West Ham United",
+        "wolves": "Wolverhampton Wanderers",
+        "atletico": "Atletico de Madrid",
+        "roma": "AS Roma",
+        "lazio": "SS Lazio",
+        "napoli": "SSC Napoli",
+        "villarreal": "Villarreal CF",
+        "bvb": "Borussia Dortmund",
+        "rb leipzig": "RasenBallsport Leipzig",
+        "rb salzburg": "FC Red Bull Salzburg",
+    }
+
     try:
         # Genereaza variante de cautare: full name + fiecare cuvant cu >= 4 litere
+        # Also try the alias expansion (e.g. "PSG" → "Paris Saint-Germain")
         search_variants = [team_name]
+        alias = _SOFIFA_TEAM_ALIASES.get(_norm(team_name))
+        if alias and alias not in search_variants:
+            search_variants.insert(0, alias)  # try alias first
         for word in team_name.split():
             if len(word) >= 4 and word not in search_variants:
                 search_variants.append(word)
@@ -841,12 +870,13 @@ def _load_overrides() -> dict:
 async def fetch_from_roster(name: str, roster: list, page,
                              client: httpx.AsyncClient, is_sub: bool = False,
                              overrides: dict = None, match_type: str = "club",
-                             flashscore_url: str = ""):
+                             flashscore_url: str = "", team_id: int = 0):
     """
     Cauta jucatorul in roster-ul pre-incarcat al echipei.
     - is_sub=True: INTOTDEAUNA viziteaza pagina jucatorului pentru kit number
     - overrides: dict cu mapari manuale Flashscore name → SoFIFA URL
     - match_type: 'club' sau 'national' (pentru kit number preferat)
+    - team_id: SoFIFA team ID for search filtering and club verification
     Returneaza (photo_bytes, kit_number, source_label, sofifa_url) sau (None, '', None, '').
     """
     clean = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
@@ -905,12 +935,19 @@ async def fetch_from_roster(name: str, roster: list, page,
                         if (mClub) kit = mClub[1];
                         else if (mNat) kit = mNat[1];
                     }
-                    return { photoUrl, kit };
+                    // Extract SoFIFA team ID from the club link (for team verification)
+                    let clubTeamId = 0;
+                    const clubLink = document.querySelector('a[href*="/team/"]');
+                    if (clubLink) {
+                        const parts = clubLink.href.split('/team/');
+                        if (parts.length > 1) clubTeamId = parseInt(parts[1]) || 0;
+                    }
+                    return { photoUrl, kit, clubTeamId };
                 }""", match_type) or {}
 
                 kit = pg.get('kit', '')
                 photo_url = pg.get('photoUrl', '')
-                print(f"photo={'DA' if photo_url else 'NU'} kit={kit or '?'}", end=" ", flush=True)
+                print(f"photo={'YES' if photo_url else 'NO'} kit={kit or '?'}", end=" ", flush=True)
 
                 if photo_url:
                     # Incearca toate marimile disponibile pe CDN sofifa
@@ -1000,7 +1037,14 @@ async def fetch_from_roster(name: str, roster: list, page,
                         if (mClub) kit = mClub[1];
                         else if (mNat) kit = mNat[1];
                     }
-                    return { photoUrl, kit };
+                    // Extract SoFIFA team ID from the club link (for team verification)
+                    let clubTeamId = 0;
+                    const clubLink = document.querySelector('a[href*="/team/"]');
+                    if (clubLink) {
+                        const parts = clubLink.href.split('/team/');
+                        if (parts.length > 1) clubTeamId = parseInt(parts[1]) || 0;
+                    }
+                    return { photoUrl, kit, clubTeamId };
                 }""", match_type) or {}
                 # Kit de pe player page are prioritate (mai sigur decat roster table)
                 if pg.get('kit'):
@@ -1028,7 +1072,9 @@ async def fetch_from_roster(name: str, roster: list, page,
         pg2 = None
         for _kw_attempt in all_kws:
             kw = _kw_attempt.replace(" ", "+")
-            search_url = f"https://sofifa.com/players?keyword={kw}&hl=en-US"
+            # Filter by team ID when known (prevents wrong-player matches)
+            team_filter = f"&teamId={team_id}" if (team_id > 0 and match_type != "national") else ""
+            search_url = f"https://sofifa.com/players?keyword={kw}{team_filter}&hl=en-US"
             await safe_goto(page, search_url, timeout=35000)
             await page.wait_for_timeout(300)
             pg2 = await page.evaluate("""(searchName) => {
@@ -1090,15 +1136,31 @@ async def fetch_from_roster(name: str, roster: list, page,
                     if (mClub) kit = mClub[1];
                     else if (mNat) kit = mNat[1];
                 }
-                return { photoUrl, kit };
+                // Extract SoFIFA team ID from the club link (for team verification)
+                let clubTeamId = 0;
+                const clubLink = document.querySelector('a[href*="/team/"]');
+                if (clubLink) {
+                    const parts = clubLink.href.split('/team/');
+                    if (parts.length > 1) clubTeamId = parseInt(parts[1]) || 0;
+                }
+                return { photoUrl, kit, clubTeamId };
             }""", match_type) or {}
-            if pg3.get('kit'): kit = pg3['kit']
-            if pg3.get('photoUrl'):
-                r = await client.get(
-                    pg3['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
-                )
-                if r.status_code == 200 and len(r.content) > 300:
-                    return r.content, kit, "direct_search", direct_url
+            # Verify the found player belongs to the expected team
+            club_tid = pg3.get('clubTeamId', 0)
+            wrong_team = (team_id > 0 and club_tid > 0
+                          and club_tid != team_id
+                          and match_type != "national")
+            if wrong_team:
+                print(f"[wrong team: clubId={club_tid} != {team_id}]", end=" ", flush=True)
+                # Fall through to step 5 (flashscore URL full name search)
+            else:
+                if pg3.get('kit'): kit = pg3['kit']
+                if pg3.get('photoUrl'):
+                    r = await client.get(
+                        pg3['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
+                    )
+                    if r.status_code == 200 and len(r.content) > 300:
+                        return r.content, kit, "direct_search", direct_url
     except Exception as e:
         print(f"[search exc: {e}]", end=" ", flush=True)
 
@@ -1118,7 +1180,8 @@ async def fetch_from_roster(name: str, roster: list, page,
                 if full_name and _norm(full_name) != _norm(clean):
                     print(f"\n        [fs full name] {full_name}...", end=" ", flush=True)
                     kw5 = full_name.replace(" ", "+")
-                    await safe_goto(page, f"https://sofifa.com/players?keyword={kw5}&hl=en-US", timeout=35000)
+                    team_filter5 = f"&teamId={team_id}" if (team_id > 0 and match_type != "national") else ""
+                    await safe_goto(page, f"https://sofifa.com/players?keyword={kw5}{team_filter5}&hl=en-US", timeout=35000)
                     await page.wait_for_timeout(300)
                     pg5 = await page.evaluate("""(searchName) => {
                         const rows = document.querySelectorAll('table tbody tr');
@@ -1168,7 +1231,14 @@ async def fetch_from_roster(name: str, roster: list, page,
                             } else {
                                 if (mClub) kit = mClub[1]; else if (mNat) kit = mNat[1];
                             }
-                            return { photoUrl, kit };
+                            // Extract SoFIFA team ID from the club link (for team verification)
+                    let clubTeamId = 0;
+                    const clubLink = document.querySelector('a[href*="/team/"]');
+                    if (clubLink) {
+                        const parts = clubLink.href.split('/team/');
+                        if (parts.length > 1) clubTeamId = parseInt(parts[1]) || 0;
+                    }
+                    return { photoUrl, kit, clubTeamId };
                         }""", match_type) or {}
                         if pg6.get('kit'): kit = pg6['kit']
                         if pg6.get('photoUrl'):
@@ -1343,12 +1413,12 @@ async def download_all_images(data: dict, images_only: bool = False,
             # ── 1. Incarca roster complet — pagina proaspata per echipa ──
             print(f"\n  SoFIFA: {home_team}...")
             sf_page = await ctx.new_page()
-            _home_tid, home_roster, home_logo_url = await get_sofifa_team_roster(home_team, sf_page)
+            home_team_id, home_roster, home_logo_url = await get_sofifa_team_roster(home_team, sf_page)
             await sf_page.close()
 
             print(f"\n  SoFIFA: {away_team}...")
             sf_page = await ctx.new_page()
-            _away_tid, away_roster, away_logo_url = await get_sofifa_team_roster(away_team, sf_page)
+            away_team_id, away_roster, away_logo_url = await get_sofifa_team_roster(away_team, sf_page)
             await sf_page.close()
 
             # ── 2. Descarca logo-uri echipe ───────────────────────────────
@@ -1377,14 +1447,14 @@ async def download_all_images(data: dict, images_only: bool = False,
                     print(f"  ⚠ Logo {filename}: not found")
 
             groups = [
-                (data["home"]["players"],     "home_player", home_roster),
-                (data["away"]["players"],     "away_player", away_roster),
-                (data["home"]["substitutes"], "home_sub",    home_roster),
-                (data["away"]["substitutes"], "away_sub",    away_roster),
+                (data["home"]["players"],     "home_player", home_roster, home_team_id),
+                (data["away"]["players"],     "away_player", away_roster, away_team_id),
+                (data["home"]["substitutes"], "home_sub",    home_roster, home_team_id),
+                (data["away"]["substitutes"], "away_sub",    away_roster, away_team_id),
             ]
 
             # ── 3. Per jucator: match in roster → descarca foto ──────────
-            for players, prefix, roster in groups:
+            for players, prefix, roster, _tid in groups:
                 is_sub = prefix.endswith("_sub")
                 for i, p in enumerate(players, 1):
                     name = p.get("name", "").strip()
@@ -1452,7 +1522,8 @@ async def download_all_images(data: dict, images_only: bool = False,
                         raw, kit, src, sofifa_url = await fetch_from_roster(
                             name, roster, page, client, is_sub=is_sub,
                             overrides=overrides, match_type=MATCH_TYPE,
-                            flashscore_url=p.get("flashscore_url", "")
+                            flashscore_url=p.get("flashscore_url", ""),
+                            team_id=_tid
                         )
                     except BaseException as e:
                         print(f"\n      ⚠ Crash '{name}': {type(e).__name__}: {e}")

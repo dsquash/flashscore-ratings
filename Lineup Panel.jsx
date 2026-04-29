@@ -245,8 +245,8 @@
         return "";
     }
 
-    // ── Helper: adauga comp in Adobe Media Encoder ────────────
-    function addToMediaEncoder() {
+    // ── Helper: adauga comp in AE Render Queue ───────────────
+    function addToRenderQueue() {
         var comp = findMatchComp();
         if (!comp) {
             if (app.project.activeItem instanceof CompItem) {
@@ -259,75 +259,22 @@
             }
         }
 
-        var isMac     = ($.os.toLowerCase().indexOf("mac") >= 0);
-        var amePath   = _findAMEPath(isMac);
-        var outputDir = Folder.desktop.fsName; // export pe Desktop
 
-        // ── Step 1: lanseaza AME din disk mai intai (Beta-first) ─
-        if (amePath) {
-            try {
-                if (isMac) {
-                    system.callSystem('open -a "' + amePath + '"');
-                } else {
-                    system.callSystem('cmd /c start "" "' + amePath.replace(/\//g, "\\") + '"');
-                }
-                $.sleep(4000);
-            } catch(eLaunch) { /* ignora */ }
-        }
+        try {
+            // Add comp to AE Render Queue
+            var rqItem = app.project.renderQueue.items.add(comp);
 
-        // ── Step 2: cauta preset H.265 ───────────────────────
-        var presetPath = "";
-        if (AME_PRESET_NAME !== "") {
-            var _candidates = [
-                AME_PRESET_NAME + ".epr",
-                "H.265 1080p High Quality.epr",
-                "H.265 4K Ultra HD.epr",
-                "H.265 720p High Quality.epr",
-                "H.265.epr"
-            ];
-            for (var _ci = 0; _ci < _candidates.length; _ci++) {
-                presetPath = _findPreset(_candidates[_ci], amePath, isMac);
-                if (presetPath) break;
-            }
-            if (!presetPath) {
-                statusTxt.text = "H.265 preset not found — adding without preset...";
-            }
-        }
+            // Set output file to Desktop
+            var outputPath = Folder.desktop.fsName.replace(/\\/g, "/") + "/" + comp.name + ".avi";
+            rqItem.outputModules[1].file = new File(outputPath);
 
-        // ── Step 3: adauga in coada AME ──────────────────────
-        // Open comp in viewer first to clear any timeline selection state
-        // (prevents "keyframes selected" error on some AE versions)
-        try { comp.openInViewer(); $.sleep(300); } catch(eV) {}
+            // Open the Render Queue panel
+            app.executeCommand(2161);
 
-        var ok = false;
-        if (app.encoder) {
-            try {
-                app.encoder.launchEncoder();
-                $.sleep(1000);
-                app.encoder.encodeComp(comp, presetPath, outputDir);
-                statusTxt.text = "\u2713 Added to AME: " + comp.name +
-                                 (presetPath ? " [H.265]" : " [no preset]") +
-                                 " \u2192 Desktop";
-                ok = true;
-            } catch(eEnc) {
-                $.sleep(4000);
-                try {
-                    app.encoder.launchEncoder();
-                    $.sleep(1000);
-                    app.encoder.encodeComp(comp, presetPath, outputDir);
-                    statusTxt.text = "\u2713 Added to AME: " + comp.name +
-                                     (presetPath ? " [H.265]" : " [no preset]") +
-                                     " \u2192 Desktop";
-                    ok = true;
-                } catch(eEnc2) { /* fall through */ }
-            }
-        }
-
-        if (!ok) {
-            statusTxt.text = "AME error \u2014 see alert.";
-            alert("Could not send to Media Encoder.\n\n" +
-                  "Make sure Adobe Media Encoder (or AME Beta) is installed.\n" +
-                  "Try opening AME manually first, then press Render again.");
+            statusTxt.text = "\u2713 Added to Render Queue: " + comp.name;
+        } catch(e) {
+            statusTxt.text = "Render Queue error \u2014 see alert.";
+            alert("Could not add to Render Queue:\n" + (e.message || String(e)));
         }
 
         try { panel.layout.layout(true); } catch(e) {}
@@ -459,9 +406,9 @@
         try { panel.layout.layout(true); } catch(e) {}
     };
 
-    // ── onClick: Add to Media Encoder ─────────────────────────
+    // ── onClick: Add to Render Queue ──────────────────────────
     btnAddRQ.onClick = function() {
-        addToMediaEncoder();
+        addToRenderQueue();
     };
 
 

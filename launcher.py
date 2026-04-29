@@ -685,12 +685,16 @@ class App(_BASE_CLS):
                 lines = [f"✓ Updated {len(updated)} file(s)."]
                 if failed:
                     lines.append(f"\n⚠ {len(failed)} file(s) failed.")
-                lines.append("\n\nPlease restart the app.")
+                lines.append("\n\nThe app will now close. Please reopen it.")
                 msg = "\n".join(lines)
                 fn = mb.showwarning if failed else mb.showinfo
-                self.after(0, lambda: fn(f"Update v{remote}", msg))
+
+                def _show_and_quit():
+                    fn(f"Update v{remote}", msg)
+                    self.destroy()
+
+                self.after(0, _show_and_quit)
                 if self._update_banner:
-                    self.after(0, self._update_banner.destroy)
                     self._update_banner = None
             except Exception as e:
                 self.after(0, prog_win.destroy)
@@ -841,7 +845,6 @@ class App(_BASE_CLS):
 
         win = tk.Toplevel(self)
         win.title("Player SoFIFA URLs")
-        win.geometry("900x620")
         win.resizable(False, False)
         win.grab_set()
 
@@ -1032,6 +1035,20 @@ class App(_BASE_CLS):
         ttk.Button(bot, text="Close", command=win.destroy,
                    **self._btn_kw("secondary-outline" if _BOOT else "secondary")
                    ).pack(side="right")
+
+        # Auto-size window to fit all content (after all widgets are built)
+        def _auto_size():
+            win.update_idletasks()
+            w = win.winfo_reqwidth() + 24
+            h = win.winfo_reqheight() + 24
+            sw = win.winfo_screenwidth()
+            sh = win.winfo_screenheight()
+            w = min(w, int(sw * 0.95))
+            h = min(h, int(sh * 0.88))
+            x = (sw - w) // 2
+            y = max(40, (sh - h) // 4)
+            win.geometry(f"{w}x{h}+{x}+{y}")
+        win.after(1, _auto_size)
 
 
 if __name__ == "__main__":

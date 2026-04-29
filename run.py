@@ -445,7 +445,8 @@ def scrape_flashscore(url: str) -> dict:
                     position_left: Math.round(posLeft),
                     position_top:  Math.round(posTop),
                     img_src: imgSrc,
-                    events: getEvents(playerEl)
+                    events: getEvents(playerEl),
+                    flashscore_url: getPlayerUrl(playerEl)
                 };
             }
 
@@ -481,6 +482,21 @@ def scrape_flashscore(url: str) -> dict:
                     });
                 });
                 return players;
+            }
+
+                        // ── Helper: extrage URL profil jucator Flashscore ────
+            function getPlayerUrl(playerEl) {
+                const a = playerEl.querySelector('a[href*="/player/"]');
+                if (a) return a.href;
+                let par = playerEl.parentElement;
+                while (par && par !== document.body) {
+                    if (par.tagName === 'A' && par.href && par.href.includes('/player/'))
+                        return par.href;
+                    const inner = par.querySelector('a[href*="/player/"]');
+                    if (inner) return inner.href;
+                    par = par.parentElement;
+                }
+                return '';
             }
 
             // ── Titulari ──────────────────────────────────────────
@@ -522,7 +538,11 @@ def scrape_flashscore(url: str) -> dict:
                 const team = isAway ? "away" : "home";
                 result[team].substitutes.push({
                     name, number: "", rating, minute, img_src: imgSrc,
-                    events: getEvents(el)
+                    events: getEvents(el),
+                    flashscore_url: (() => {
+                        const a = el.querySelector('a[href*="/player/"]');
+                        return a ? a.href : '';
+                    })()
                 });
             });
 
@@ -823,7 +843,8 @@ def _load_overrides() -> dict:
 
 async def fetch_from_roster(name: str, roster: list, page,
                              client: httpx.AsyncClient, is_sub: bool = False,
-                             overrides: dict = None, match_type: str = "club"):
+                             overrides: dict = None, match_type: str = "club",
+                             flashscore_url: str = ""):
     """
     Cauta jucatorul in roster-ul pre-incarcat al echipei.
     - is_sub=True: INTOTDEAUNA viziteaza pagina jucatorului pentru kit number
@@ -1077,6 +1098,82 @@ async def fetch_from_roster(name: str, roster: list, page,
                     return r.content, kit, "direct_search", direct_url
     except Exception as e:
         print(f"[search exc: {e}]", end=" ", flush=True)
+
+    # ── 5. Fallback: cauta cu numele complet extras din URL-ul Flashscore ──────
+    # Ex: /player/martinelli-gabriel-silva-xfC4qst7/ → "Gabriel Martinelli Silva"
+    if not photo_raw and flashscore_url:
+        try:
+            import re as _re
+            m_slug = _re.search(r'/player/([^/?#]+)', flashscore_url)
+            if m_slug:
+                slug = m_slug.group(1).rstrip('/')
+                # Scoate ID-ul de la final (8-12 chars alfanumerici mixti)
+                parts = slug.split('-')
+                if parts and _re.match(r'^[A-Za-z0-9]{6,12}$', parts[-1]) and _re.search(r'\d', parts[-1]):
+                    parts = parts[:-1]
+                full_name = ' '.join(p.capitalize() for p in parts if p)
+                if full_name and _norm(full_name) != _norm(clean):
+                    print(f"\n        [fs full name] {full_name}...", end=" ", flush=True)
+                    kw5 = full_name.replace(" ", "+")
+                    await safe_goto(page, f"https://sofifa.com/players?keyword={kw5}&hl=en-US", timeout=35000)
+                    await page.wait_for_timeout(300)
+                    pg5 = await page.evaluate("""(searchName) => {
+                        const rows = document.querySelectorAll('table tbody tr');
+                        let best = null, bestScore = -1;
+                        const norm = s => s.toLowerCase().normalize('NFD')
+                            .replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9 ]/g,'');
+                        const toks = norm(searchName).split(' ').filter(t => t.length >= 3);
+                        if (!toks.length) return null;
+                        rows.forEach(row => {
+                            const link = row.querySelector('td a[href*="/player/"]');
+                            if (!link) return;
+                            const nm   = norm(link.innerText);
+                            const slug = norm(link.href.replace(/-/g,' '));
+                            const scNm  = toks.reduce((s,t) => s + (nm.includes(t)   ? 1 : 0), 0) / toks.length;
+                            const scUrl = toks.reduce((s,t) => s + (slug.includes(t) ? 1 : 0), 0) / toks.length;
+                            const sc = Math.max(scNm, scUrl);
+                            if (sc > bestScore) { bestScore = sc; best = { url: link.href, score: sc }; }
+                        });
+                        if (!best || bestScore < 0.4) return null;
+                        return best;
+                    }""", full_name)
+                    if pg5 and pg5.get('url'):
+                        await safe_goto(page, pg5['url'], timeout=35000)
+                        await page.wait_for_timeout(600)
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        await page.wait_for_timeout(500)
+                        await page.evaluate("window.scrollTo(0, 0)")
+                        pg6 = await page.evaluate("""(matchType) => {
+                            let photoUrl = '';
+                            for (const img of document.querySelectorAll('img')) {
+                                const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
+                                for (const src of candidates) {
+                                    const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
+                                    if (m && parseInt(m[1]) > 0) {
+                                        photoUrl = src.replace('_120.png','_240.png').replace('_60.png','_240.png');
+                                        break;
+                                    }
+                                }
+                                if (photoUrl) break;
+                            }
+                            let kit = '';
+                            const body = document.body.innerText;
+                            const mClub = body.match(/Kit\\s*Number\\s*(?:\\(Club\\)|Club)[\\s:\\-\\t]*(\\d{1,3})/i);
+                            const mNat  = body.match(/Kit\\s*Number\\s*(?:\\(National\\)|National)[\\s:\\-\\t]*(\\d{1,3})/i);
+                            if (matchType === 'national') {
+                                if (mNat) kit = mNat[1]; else if (mClub) kit = mClub[1];
+                            } else {
+                                if (mClub) kit = mClub[1]; else if (mNat) kit = mNat[1];
+                            }
+                            return { photoUrl, kit };
+                        }""", match_type) or {}
+                        if pg6.get('kit'): kit = pg6['kit']
+                        if pg6.get('photoUrl'):
+                            r6 = await client.get(pg6['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True)
+                            if r6.status_code == 200 and len(r6.content) > 300:
+                                return r6.content, kit, "fs_fullname", pg5['url']
+        except Exception as e5:
+            print(f"[fs_fullname exc: {e5}]", end=" ", flush=True)
 
     # Pastreaza kit-ul gasit (din roster / pagina jucatorului) chiar daca poza a esuat
     return None, kit, None, (best.get('playerUrl', '') if best else '')
@@ -1351,7 +1448,8 @@ async def download_all_images(data: dict, images_only: bool = False,
                     try:
                         raw, kit, src, sofifa_url = await fetch_from_roster(
                             name, roster, page, client, is_sub=is_sub,
-                            overrides=overrides, match_type=MATCH_TYPE
+                            overrides=overrides, match_type=MATCH_TYPE,
+                            flashscore_url=p.get("flashscore_url", "")
                         )
                     except BaseException as e:
                         print(f"\n      ⚠ Crash '{name}': {type(e).__name__}: {e}")

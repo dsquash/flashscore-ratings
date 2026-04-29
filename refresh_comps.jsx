@@ -120,7 +120,6 @@ if (typeof JSON.stringify !== "function") {
         { list: data.away.substitutes,  prefix: "away_sub_",    isSub: true  }
     ];
 
-    var unchanged = 0;
     var kitsUpdated = 0;
 
     for (var g = 0; g < groups.length; g++) {
@@ -128,9 +127,8 @@ if (typeof JSON.stringify !== "function") {
         for (var p = 0; p < grp.list.length; p++) {
             var player = grp.list[p];
             var idx    = p + 1;
-            // Suporta atat "home_player_1" cat si "home_player_01" (zero-padded din populate_lineup)
-            var id       = grp.prefix + idx;
-            var idPad    = grp.prefix + (idx < 10 ? "0" + idx : idx);
+            var id     = grp.prefix + idx;
+            var idPad  = grp.prefix + (idx < 10 ? "0" + idx : idx);
 
             var statsComp = findCompByName("Stats_" + id)
                          || findCompByName("Stats_" + idPad);
@@ -139,14 +137,11 @@ if (typeof JSON.stringify !== "function") {
             var ctrl = findLayerIn(statsComp, CTRL_LAYER);
             if (!ctrl) { skipped++; continue; }
 
-            if (!playerNeedsUpdate(ctrl, player, grp.isSub)) {
-                unchanged++;
-            } else {
-                refreshPlayerStats(ctrl, player, grp.isSub);
-                updated++;
-            }
+            // Always overwrite — no comparison needed
+            refreshPlayerStats(ctrl, player, grp.isSub);
+            updated++;
 
-            // ── Kit number: actualizeaza intotdeauna layer-ul "1" din PT comp ────
+            // Kit number: sync from data.json
             if (player.number !== undefined && player.number !== null) {
                 var ptComp = findCompByName("PT_" + id)
                           || findCompByName("PT_" + idPad);
@@ -166,70 +161,15 @@ if (typeof JSON.stringify !== "function") {
     var msg = "\u2713 Refresh complete!\n\n";
     msg += "\u2022 Score: " + scoreStr + "\n";
     msg += "\u2022 Avg: " + (match.home_avg_rating || "?") + " / " + (match.away_avg_rating || "?") + "\n";
-    msg += "\u2022 Stats updated: " + updated + "\n";
+    msg += "\u2022 Players synced: " + updated + "\n";
     if (kitsUpdated > 0)
         msg += "\u2022 Kit numbers synced: " + kitsUpdated + "\n";
-    if (unchanged > 0)
-        msg += "\u2022 Unchanged (skipped): " + unchanged + "\n";
     if (skipped > 0)
         msg += "\u2022 Comp not found: " + skipped + "\n";
-    msg += "\nNo re-populate needed \u2014 positions unchanged.";
+    msg += "\nPositions and photos unchanged.";
     alert(msg);
 
     // ── Helpers ───────────────────────────────────────────────────
-
-    /**
-     * Compara valorile curente din AE cu cele din data.json.
-     * Returneaza true daca cel putin o valoare s-a schimbat.
-     */
-    function playerNeedsUpdate(ctrl, player, isSub) {
-        try {
-            var ev      = player.events || [];
-            var rating  = parseFloat(player.rating) || 0;
-            var nGoals  = cnt(ev, "goal");
-            var expGoal   = has(ev, "goal")         ? 1 : 0;
-            var expYellow = has(ev, "yellow_card")   ? 1 : 0;
-            var expRed    = has(ev, "red_card")      ? 1 : 0;
-            var expStar   = has(ev, "star")          ? 1 : 0;
-            var expChange = isSub ? 1 : (has(ev, "substituted_out") ? 1 : 0);
-            var expMG     = nGoals >= 2 ? 1 : 0;
-
-            var curNote = 0;
-            try { curNote = ctrl.effect(FX.note).property(1).value; } catch(e) { return true; }
-            if (Math.abs(curNote - rating) > 0.005) return true;
-
-            var curGoal = 0;
-            try { curGoal = ctrl.effect(FX.goal).property(1).value; } catch(e) { return true; }
-            if (curGoal !== expGoal) return true;
-
-            var curYellow = 0;
-            try { curYellow = ctrl.effect(FX.yellowCard).property(1).value; } catch(e) { return true; }
-            if (curYellow !== expYellow) return true;
-
-            var curRed = 0;
-            try { curRed = ctrl.effect(FX.redCard).property(1).value; } catch(e) { return true; }
-            if (curRed !== expRed) return true;
-
-            var curStar = 0;
-            try { curStar = ctrl.effect(FX.star).property(1).value; } catch(e) { return true; }
-            if (curStar !== expStar) return true;
-
-            var curChange = 0;
-            try { curChange = ctrl.effect(FX.change).property(1).value; } catch(e) { return true; }
-            if (curChange !== expChange) return true;
-
-            var curMG = 0;
-            try {
-                try { curMG = ctrl.effect("Multiple Goals").property("Checkbox").value; }
-                catch(e) { curMG = ctrl.effect("Multiple Goals").property(1).value; }
-            } catch(e) { return true; }
-            if (curMG !== expMG) return true;
-
-            return false;
-        } catch(e) {
-            return true; // la orice eroare de citire → actualizeaza safe
-        }
-    }
 
     /**
      * Scrie efectele pe ctrl layer. ctrl este primit direct (deja gasit).

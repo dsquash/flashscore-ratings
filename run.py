@@ -486,14 +486,17 @@ def scrape_flashscore(url: str) -> dict:
 
                         // ── Helper: extrage URL profil jucator Flashscore ────
             function getPlayerUrl(playerEl) {
+                // 1. Link direct in interiorul elementului
                 const a = playerEl.querySelector('a[href*="/player/"]');
                 if (a) return a.href;
+                // 2. Elementul e infasurat intr-un <a> (traverseaza DOAR spre radacina,
+                //    fara a cauta in descendenti — altfel prinde URL-uri ale altor jucatori)
                 let par = playerEl.parentElement;
                 while (par && par !== document.body) {
                     if (par.tagName === 'A' && par.href && par.href.includes('/player/'))
                         return par.href;
-                    const inner = par.querySelector('a[href*="/player/"]');
-                    if (inner) return inner.href;
+                    // Nu face querySelector pe par (ar gasi primul /player/ link din sectiune,
+                    // care poate fi al unui alt jucator)
                     par = par.parentElement;
                 }
                 return '';
@@ -679,14 +682,106 @@ async def get_sofifa_team_roster(team_name: str, page,
         "brighton": "Brighton & Hove Albion",
         "west ham": "West Ham United",
         "wolves": "Wolverhampton Wanderers",
+        # Atletico Madrid — multiple Flashscore abbreviations
         "atletico": "Atletico de Madrid",
+        "atl madrid": "Atletico de Madrid",
+        "atletico madrid": "Atletico de Madrid",
+        "atletico de madrid": "Atletico de Madrid",
+        "a madrid": "Atletico de Madrid",
+        # Other common La Liga / European short names
+        "real betis": "Real Betis",
+        "betis": "Real Betis",
+        "real sociedad": "Real Sociedad",
+        "sociedad": "Real Sociedad",
+        "sevilla": "Sevilla FC",
+        "celta vigo": "RC Celta",
+        "celta": "RC Celta",
+        "deportivo alavs": "Deportivo Alaves",
+        "alaves": "Deportivo Alaves",
+        "osasuna": "CA Osasuna",
+        "getafe": "Getafe CF",
+        "mallorca": "RCD Mallorca",
+        "las palmas": "UD Las Palmas",
+        "girona": "Girona FC",
+        "valladolid": "Real Valladolid",
+        "rayo vallecano": "Rayo Vallecano",
+        "rayo": "Rayo Vallecano",
+        "leganes": "CD Leganes",
+        "espanyol": "RCD Espanyol",
+        "bayer leverkusen": "Bayer 04 Leverkusen",
+        "leverkusen": "Bayer 04 Leverkusen",
+        "eintracht frankfurt": "Eintracht Frankfurt",
+        "frankfurt": "Eintracht Frankfurt",
+        "rb leipzig": "RasenBallsport Leipzig",
+        "rb salzburg": "FC Red Bull Salzburg",
+        "bvb": "Borussia Dortmund",
+        "dortmund": "Borussia Dortmund",
+        "gladbach": "Borussia Monchengladbach",
+        "m gladbach": "Borussia Monchengladbach",
+        "hoffenheim": "TSG Hoffenheim",
+        "wolfsburg": "VfL Wolfsburg",
+        "freiburg": "Sport-Club Freiburg",
+        "mainz": "1. FSV Mainz 05",
+        "augsburg": "FC Augsburg",
+        "bochum": "VfL Bochum",
+        "heidenheim": "1. FC Heidenheim 1846",
+        "st pauli": "FC St. Pauli",
+        "union berlin": "1. FC Union Berlin",
         "roma": "AS Roma",
         "lazio": "SS Lazio",
         "napoli": "SSC Napoli",
+        "atalanta": "Atalanta BC",
+        "fiorentina": "ACF Fiorentina",
+        "torino": "Torino FC",
+        "bologna": "Bologna FC 1909",
+        "udinese": "Udinese Calcio",
+        "cagliari": "Cagliari Calcio",
+        "monza": "AC Monza",
+        "lecce": "US Lecce",
+        "parma": "Parma Calcio 1913",
+        "como": "Como 1907",
+        "venezia": "Venezia FC",
+        "empoli": "Empoli FC",
+        "genoa": "Genoa CFC",
+        "verona": "Hellas Verona FC",
         "villarreal": "Villarreal CF",
-        "bvb": "Borussia Dortmund",
-        "rb leipzig": "RasenBallsport Leipzig",
-        "rb salzburg": "FC Red Bull Salzburg",
+        "ajax": "AFC Ajax",
+        "psv": "PSV",
+        "psv eindhoven": "PSV",
+        "feyenoord": "Feyenoord",
+        "porto": "FC Porto",
+        "benfica": "SL Benfica",
+        "sporting": "Sporting CP",
+        "sporting cp": "Sporting CP",
+        "braga": "SC Braga",
+        "celtic": "Celtic",
+        "rangers": "Rangers",
+        "anderlecht": "RSC Anderlecht",
+        "club brugge": "Club Brugge KV",
+        "brugge": "Club Brugge KV",
+        "lyon": "Olympique Lyonnais",
+        "marseille": "Olympique de Marseille",
+        "lille": "LOSC Lille",
+        "monaco": "AS Monaco",
+        "lens": "RC Lens",
+        "rennes": "Stade Rennais FC",
+        "nice": "OGC Nice",
+        "strasbourg": "RC Strasbourg Alsace",
+        "nantes": "FC Nantes",
+        "reims": "Stade de Reims",
+        "montpellier": "Montpellier HSC",
+        "angers": "Angers SCO",
+        "le havre": "Le Havre AC",
+        "toulouse": "Toulouse FC",
+        "auxerre": "AJ Auxerre",
+        "fenerbahce": "Fenerbahce SK",
+        "galatasaray": "Galatasaray SK",
+        "besiktas": "Besiktas JK",
+        "shakhtar": "Shakhtar Donetsk",
+        "shaktar": "Shakhtar Donetsk",
+        "dinamo zagreb": "GNK Dinamo Zagreb",
+        "red star": "FK Red Star Belgrade",
+        "red star belgrade": "FK Red Star Belgrade",
     }
 
     try:
@@ -1149,22 +1244,16 @@ async def fetch_from_roster(name: str, roster: list, page,
                 }
                 return { photoUrl, kit, clubTeamId };
             }""", match_type) or {}
-            # Verify the found player belongs to the expected team
-            club_tid = pg3.get('clubTeamId', 0)
-            wrong_team = (team_id > 0 and club_tid > 0
-                          and club_tid != team_id
-                          and match_type != "national")
-            if wrong_team:
-                print(f"[wrong team: clubId={club_tid} != {team_id}]", end=" ", flush=True)
-                # Fall through to step 5 (flashscore URL full name search)
-            else:
-                if pg3.get('kit'): kit = pg3['kit']
-                if pg3.get('photoUrl'):
-                    r = await client.get(
-                        pg3['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
-                    )
-                    if r.status_code == 200 and len(r.content) > 300:
-                        return r.content, kit, "direct_search", direct_url
+            # teamId filter in the search URL already guards against wrong players.
+            # Additional club ID check on the player page is skipped because SoFIFA uses
+            # different team IDs for the same club across FIFA versions (e.g. FC24 vs FC25).
+            if pg3.get('kit'): kit = pg3['kit']
+            if pg3.get('photoUrl'):
+                r = await client.get(
+                    pg3['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
+                )
+                if r.status_code == 200 and len(r.content) > 300:
+                    return r.content, kit, "direct_search", direct_url
     except Exception as e:
         print(f"[search exc: {e}]", end=" ", flush=True)
 

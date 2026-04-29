@@ -295,19 +295,25 @@
         }
 
         // ── Step 3: adauga in coada AME ──────────────────────
+        // Open comp in viewer first to clear any timeline selection state
+        // (prevents "keyframes selected" error on some AE versions)
+        try { comp.openInViewer(); $.sleep(300); } catch(eV) {}
+
         var ok = false;
         if (app.encoder) {
             try {
                 app.encoder.launchEncoder();
+                $.sleep(1000);
                 app.encoder.encodeComp(comp, presetPath, outputDir);
                 statusTxt.text = "\u2713 Added to AME: " + comp.name +
                                  (presetPath ? " [H.265]" : " [no preset]") +
                                  " \u2192 Desktop";
                 ok = true;
             } catch(eEnc) {
-                $.sleep(3000);
+                $.sleep(4000);
                 try {
                     app.encoder.launchEncoder();
+                    $.sleep(1000);
                     app.encoder.encodeComp(comp, presetPath, outputDir);
                     statusTxt.text = "\u2713 Added to AME: " + comp.name +
                                      (presetPath ? " [H.265]" : " [no preset]") +

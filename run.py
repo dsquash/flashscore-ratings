@@ -15,7 +15,7 @@ Ce face:
     3. Salveaza flashscore_output/data.json
     4. Salveaza flashscore_output/images/home_player_1.png etc.
 
-Urmator pas:
+Next step:
     Deschide proiectul AE si ruleaza populate_lineup.jsx
 """
 
@@ -157,7 +157,7 @@ def scrape_flashscore(url: str) -> dict:
             page.wait_for_selector(".lf__formation", timeout=15000)
             print("      Lineup OK")
         except Exception:
-            print("      ⚠ Lineup nu s-a incarcat — verifica debug.png")
+            print("      ⚠ Lineup not loaded — check debug.png")
 
         # Scroll pana jos ca sa se incarce lazy-loaded substitutions
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -273,7 +273,7 @@ def scrape_flashscore(url: str) -> dict:
             // Metoda 1: scaneaza body.innerText pentru "Ø X.X" — ordinea in text = home first, away second
             {
                 const bodyText = (document.body.innerText || '');
-                const re = /[\u00d8\u00f8\u00d8Ø]\s*(\d\.\d)/g;
+                const re = /[\u00d8\u00f8\u00d8Ø]\\s*(\\d\\.\\d)/g;
                 let m;
                 while ((m = re.exec(bodyText)) !== null && avgFound.length < 2) {
                     const v = parseFloat(m[1]);
@@ -293,7 +293,7 @@ def scrape_flashscore(url: str) -> dict:
                     document.querySelectorAll(sel).forEach(el => {
                         if (avgFound.length >= 2) return;
                         const t = (el.innerText || '').trim();
-                        const m = t.match(/(\d\.\d)/);
+                        const m = t.match(/(\\d\\.\\d)/);
                         if (m) {
                             const v = parseFloat(m[1]);
                             if (v >= 4.0 && v <= 9.9) avgFound.push(m[1]);
@@ -539,10 +539,7 @@ def scrape_flashscore(url: str) -> dict:
                 result[team].substitutes.push({
                     name, number: "", rating, minute, img_src: imgSrc,
                     events: getEvents(el),
-                    flashscore_url: (() => {
-                        const a = el.querySelector('a[href*="/player/"]');
-                        return a ? a.href : '';
-                    })()
+                    flashscore_url: getPlayerUrl(el)
                 });
             });
 
@@ -562,7 +559,7 @@ def scrape_flashscore(url: str) -> dict:
                 testid_path = str(OUTPUT_DIR / "debug_testids.txt")
                 with open(testid_path, "w", encoding="utf-8") as tf:
                     tf.write("\n".join(testids))
-                print(f"      Debug testids salvate: {testid_path}")
+                print(f"      Debug testids saved: {testid_path}")
         except Exception:
             pass
 
@@ -573,24 +570,24 @@ def scrape_flashscore(url: str) -> dict:
     print(f"      {m['home_formation']} vs {m['away_formation']}")
     if m.get('home_avg_rating'):
         print(f"      Avg ratings: Ø{m['home_avg_rating']} vs Ø{m['away_avg_rating']}")
-    print(f"      Home: {len(data['home']['players'])} titulari, {len(data['home']['substitutes'])} rezerve")
-    print(f"      Away: {len(data['away']['players'])} titulari, {len(data['away']['substitutes'])} rezerve")
+    print(f"      Home: {len(data['home']['players'])} starters, {len(data['home']['substitutes'])} subs")
+    print(f"      Away: {len(data['away']['players'])} starters, {len(data['away']['substitutes'])} subs")
 
     # Lista jucatori pentru verificare
-    print(f"\n      HOME titulari: {[p['name'] for p in data['home']['players']]}")
-    print(f"      HOME rezerve:  {[p['name'] for p in data['home']['substitutes']]}")
-    print(f"      AWAY titulari: {[p['name'] for p in data['away']['players']]}")
-    print(f"      AWAY rezerve:  {[p['name'] for p in data['away']['substitutes']]}")
+    print(f"\n      HOME starters: {[p['name'] for p in data['home']['players']]}")
+    print(f"      HOME subs:  {[p['name'] for p in data['home']['substitutes']]}")
+    print(f"      AWAY starters: {[p['name'] for p in data['away']['players']]}")
+    print(f"      AWAY subs:  {[p['name'] for p in data['away']['substitutes']]}")
 
     # Debug goluri — arata toti jucatorii cu events ca sa verificam golurile multiple
     all_players = (data['home']['players'] + data['home']['substitutes'] +
                    data['away']['players'] + data['away']['substitutes'])
     goal_players = [p for p in all_players if 'goal' in p.get('events', [])]
     if goal_players:
-        print(f"\n      GOLURI DETECTATE:")
+        print(f"\n      GOALS DETECTED:")
         for p in goal_players:
             n_goals = p['events'].count('goal')
-            print(f"        {p['name']}: {n_goals} gol(uri) | events={p['events']}")
+            print(f"        {p['name']}: {n_goals} goal(s) | events={p['events']}")
 
     return data
 
@@ -715,12 +712,12 @@ async def get_sofifa_team_roster(team_name: str, page) -> tuple:
             if href:
                 used_variant = variant
                 if variant != team_name:
-                    print(f"      SoFIFA: '{team_name}' gasit cu varianta '{variant}'")
+                    print(f"      SoFIFA: '{team_name}' found as '{variant}'")
                 break
 
         if not href:
             title = await page.title()
-            print(f"      ⚠ '{team_name}' negasit pe sofifa.com/teams (page: '{title}')")
+            print(f"      ⚠ '{team_name}' not found on sofifa.com/teams (page: '{title}')")
             return 0, [], ""
 
         m = re.search(r'/team/(\d+)', href)
@@ -818,7 +815,7 @@ async def get_sofifa_team_roster(team_name: str, page) -> tuple:
             return result;
         }""")
 
-        print(f"      Roster '{team_name}': {len(roster)} jucatori | logo={'DA' if logo_url else 'NU'}")
+        print(f"      Roster '{team_name}': {len(roster)} players | logo={'YES' if logo_url else 'NO'}")
         return team_id, roster, logo_url
 
     except Exception as e:
@@ -927,9 +924,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                                 return r.content, kit, "override", override_url
                         except Exception:
                             pass
-                    print(f"[404 toate marimile]", end=" ")
+                    print(f"[404 all sizes]", end=" ")
                 else:
-                    print(f"[poza negasita pe pagina override]", end=" ")
+                    print(f"[photo not found on override page]", end=" ")
             except Exception as e:
                 print(f"[override err: {e}]", end=" ")
 
@@ -1026,11 +1023,15 @@ async def fetch_from_roster(name: str, roster: list, page,
     # (folosit cand jucatorul nu e in roster: ex. imprumut, jucator nou)
     print(f"\n        [direct search] {clean}...", end=" ", flush=True)
     try:
-        kw = _search_keywords(clean)[0].replace(" ", "+")
-        search_url = f"https://sofifa.com/players?keyword={kw}&hl=en-US"
-        await safe_goto(page, search_url, timeout=35000)
-        await page.wait_for_timeout(300)
-        pg2 = await page.evaluate("""(searchName) => {
+        # Try all keyword variants (e.g. "Ruiz F" → "Ruiz F", "Ruiz")
+        all_kws = _search_keywords(clean)
+        pg2 = None
+        for _kw_attempt in all_kws:
+            kw = _kw_attempt.replace(" ", "+")
+            search_url = f"https://sofifa.com/players?keyword={kw}&hl=en-US"
+            await safe_goto(page, search_url, timeout=35000)
+            await page.wait_for_timeout(300)
+            pg2 = await page.evaluate("""(searchName) => {
             const rows = document.querySelectorAll('table tbody tr');
             let best = null, bestScore = -1;
             const norm = s => s.toLowerCase().normalize('NFD')
@@ -1050,6 +1051,8 @@ async def fetch_from_roster(name: str, roster: list, page,
             if (!best || bestScore < 0.5) return null;
             return best;
         }""", clean)
+            if pg2:
+                break  # found a match — stop trying other keywords
         if pg2 and pg2.get('url'):
             direct_url = pg2['url']
             await safe_goto(page, direct_url, timeout=35000)
@@ -1288,14 +1291,14 @@ async def download_all_images(data: dict, images_only: bool = False,
     from playwright.async_api import async_playwright
 
     if player_only:
-        print(f"\n[2/3] Descarcare poza pentru: {player_only}...")
+        print(f"\n[2/3] Downloading photo for: {player_only}...")
     else:
-        print(f"\n[2/3] Descarcare poze + numere (SoFIFA roster per echipa)...")
+        print(f"\n[2/3] Downloading photos + kit numbers (SoFIFA roster per team)...")
 
     # Incarca overrides manuale (sofifa_overrides.json)
     overrides = _load_overrides()
     if overrides:
-        print(f"  Override-uri active: {list(overrides.keys())}")
+        print(f"  Active overrides: {list(overrides.keys())}")
 
     home_team = data.get("match", {}).get("home_team", "")
     away_team = data.get("match", {}).get("away_team", "")
@@ -1371,7 +1374,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                     except Exception:
                         pass
                 if not saved:
-                    print(f"  ⚠ Logo {filename}: negasit")
+                    print(f"  ⚠ Logo {filename}: not found")
 
             groups = [
                 (data["home"]["players"],     "home_player", home_roster),
@@ -1440,7 +1443,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                         continue
 
                     if is_placeholder:
-                        print(f"  → {name} (placeholder — re-incerc) ...", end=" ", flush=True)
+                        print(f"  → {name} (placeholder — retrying) ...", end=" ", flush=True)
                     else:
                         print(f"  → {name} ...", end=" ", flush=True)
                     raw = kit = src = sofifa_url = None
@@ -1506,9 +1509,9 @@ async def download_all_images(data: dict, images_only: bool = False,
 
         await browser.close()
 
-    print(f"\n      Descarcate: {ok}  |  Negasite: {fail}")
+    print(f"\n      Downloaded: {ok}  |  Not found: {fail}")
     if missing:
-        print(f"      Lipsa: {', '.join(missing)}")
+        print(f"      Missing: {', '.join(missing)}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1519,7 +1522,7 @@ def main():
     # Suporta flag --images-only: sare peste scraping, foloseste data.json existent
     images_only = "--images-only" in sys.argv
 
-    # Suporta --player "Nume": descarca DOAR jucatorul respectiv (override rapid)
+    # Supports --player "Nume": descarca DOAR jucatorul respectiv (override rapid)
     player_only = None
     for i, a in enumerate(sys.argv):
         if a == "--player" and i + 1 < len(sys.argv):
@@ -1536,7 +1539,7 @@ def main():
         print("=" * 55)
         print("\nUsage:")
         print('  python run.py "https://www.flashscore.com/match/..."')
-        print('  python run.py --images-only   # re-descarca imagini cu overrides')
+        print('  python run.py --images-only   # re-download images with overrides')
         sys.exit(1)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1552,7 +1555,7 @@ def main():
         if not data_path.exists():
             print("\n⚠ Nu exista data.json. Ruleaza mai intai fara --images-only.")
             sys.exit(1)
-        print("\n[--images-only] Folosesc data.json existent, re-descarc imaginile...")
+        print("\n[--images-only] Using existing data.json, re-downloading images...")
         with open(data_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     else:
@@ -1564,7 +1567,7 @@ def main():
         data = scrape_flashscore(url)
 
         if not data["home"]["players"]:
-            print("\n⚠ Nu s-au gasit jucatori. Verifica flashscore_output/debug.png")
+            print("\n⚠ No players found. Check flashscore_output/debug.png")
             return
 
     # 2. Download imagini de pe SoFIFA
@@ -1578,21 +1581,21 @@ def main():
             p.pop("img_src", None)
 
     # 4. Salveaza data.json
-    print(f"\n[3/3] Salvare data.json...")
+    print(f"\n[3/3] Saving data.json...")
     data_path = OUTPUT_DIR / "data.json"
     with open(data_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"      Salvat: {data_path}")
+    print(f"      Saved: {data_path}")
 
     m = data["match"]
     print(f"""
 {"=" * 55}
-  GATA!
+  DONE!
   {m["home_team"]} {m["home_score"]} - {m["away_score"]} {m["away_team"]}
   {m["home_formation"]} vs {m["away_formation"]}
 
-  Urmator pas:
-    Deschide .aep si ruleaza populate_lineup.jsx
+  Next step:
+    Open .aep and run populate_lineup.jsx
 {"=" * 55}
 """)
 

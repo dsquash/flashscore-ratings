@@ -680,21 +680,14 @@ class App(_BASE_CLS):
                 def on_progress(current, total, name, ok):
                     status = "✓" if ok else "✗"
                     self.after(0, progress_var.set, f"[{current}/{total}] {status}  {name}")
-                updated, failed, ae_results = updater.apply_update(on_progress)
+                updated, failed, _ = updater.apply_update(on_progress)
                 self.after(0, prog_win.destroy)
                 lines = [f"✓ Updated {len(updated)} file(s)."]
-                if ae_results:
-                    ae_ok  = [r for r in ae_results if r[1]]
-                    ae_bad = [r for r in ae_results if not r[1]]
-                    if ae_ok:  lines.append(f"\n✓ AE extension: {len(ae_ok)} location(s).")
-                    if ae_bad: lines.append(f"\n⚠ AE failed in {len(ae_bad)} location(s).")
-                else:
-                    lines.append("\nℹ Copy 'Lineup Panel.jsx' to AE Scripts/ScriptUI Panels manually.")
                 if failed:
                     lines.append(f"\n⚠ {len(failed)} file(s) failed.")
                 lines.append("\n\nPlease restart the app.")
                 msg = "\n".join(lines)
-                fn = mb.showwarning if (failed or any(not r[1] for r in ae_results)) else mb.showinfo
+                fn = mb.showwarning if failed else mb.showinfo
                 self.after(0, lambda: fn(f"Update v{remote}", msg))
                 if self._update_banner:
                     self.after(0, self._update_banner.destroy)

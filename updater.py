@@ -70,7 +70,7 @@ elif sys.platform == "darwin":
 else:
     UPDATABLE_FILES = list(_COMMON_FILES)
 
-AE_PANEL_FILE = "Lineup Panel.jsx"
+AE_PANEL_FILE = "Lineup Panel.jsx"  # kept for reference only
 
 
 # ── Version helpers ───────────────────────────────────────────────
@@ -122,72 +122,11 @@ def check_for_update(timeout: int = 8) -> tuple:
         return False, local, "?"
 
 
-# ── AE extension installer ────────────────────────────────────────
-
-def find_ae_script_folders() -> list:
-    """
-    Returns all After Effects ScriptUI Panels folders found on this machine.
-    Searches standard Program Files paths for any AE version.
-    """
-    import os
-    folders = []
-    base = Path("C:/Program Files/Adobe")
-    if base.exists():
-        for ae_dir in base.glob("Adobe After Effects*"):
-            panel_dir = ae_dir / "Support Files" / "Scripts" / "ScriptUI Panels"
-            if panel_dir.exists():
-                folders.append(panel_dir)
-    return folders
-
-
-def install_ae_extension(panel_src: Path) -> list:
-    """
-    Copies Lineup Panel.jsx to all detected AE ScriptUI Panels folders.
-    On permission errors, retries via PowerShell (elevated copy).
-    Returns list of (path, success, error_msg) tuples.
-    """
-    import subprocess
-    results = []
-    ae_folders = find_ae_script_folders()
-    for folder in ae_folders:
-        dest = folder / AE_PANEL_FILE
-        ok = False
-        err_msg = ""
-        # First try direct copy
-        try:
-            shutil.copy2(str(panel_src), str(dest))
-            ok = True
-        except PermissionError:
-            # Retry via PowerShell with elevated privileges (UAC prompt)
-            try:
-                ps_cmd = (
-                    f'Copy-Item -Path "{panel_src}" -Destination "{dest}" -Force'
-                )
-                result = subprocess.run(
-                    ["powershell", "-NoProfile", "-Command",
-                     f'Start-Process powershell -ArgumentList \'-NoProfile -Command "{ps_cmd}"\''
-                     ' -Verb RunAs -Wait'],
-                    capture_output=True, timeout=30
-                )
-                # Verify the copy succeeded
-                if dest.exists():
-                    ok = True
-                else:
-                    err_msg = "Copy via UAC failed — try running the app as Administrator."
-            except Exception as e2:
-                err_msg = f"Permission denied. Run as Administrator to install AE extension. ({e2})"
-        except Exception as e:
-            err_msg = str(e)
-        results.append((str(folder), ok, err_msg))
-    return results
-
-
 # ── Apply update ──────────────────────────────────────────────────
 
 def apply_update(progress_cb=None) -> tuple:
     """
     Downloads each file in UPDATABLE_FILES from GitHub and saves it locally.
-    Then installs the AE extension to all detected AE folders.
 
     progress_cb(current, total, label, ok) called after each step.
     Returns (updated: list, failed: list, ae_results: list).
@@ -220,13 +159,7 @@ def apply_update(progress_cb=None) -> tuple:
         if progress_cb:
             progress_cb(i + 1, total, filename, ok)
 
-    # Install AE extension
-    ae_results = []
-    panel_src = BASE_DIR / AE_PANEL_FILE
-    if panel_src.exists():
-        ae_results = install_ae_extension(panel_src)
-
-    return updated, failed, ae_results
+    return updated, failed, []
 
 
 def get_changelog() -> str:
@@ -275,19 +208,9 @@ if __name__ == "__main__":
         status = "✓" if ok else "✗"
         print(f"  [{current}/{total}] {status}  {name}")
 
-    updated, failed, ae_results = apply_update(prog)
+    updated, failed, _ = apply_update(prog)
 
     print(f"\nUpdated {len(updated)} file(s).")
-
-    if ae_results:
-        print("\nAfter Effects extension:")
-        for path, ok, err in ae_results:
-            if ok:
-                print(f"  ✓ Installed → {path}")
-            else:
-                print(f"  ✗ Failed ({path}): {err}")
-    elif not ae_results:
-        print("\nAfter Effects: no AE installation found (copy Lineup Panel.jsx manually).")
 
     if failed:
         print(f"\nFailed ({len(failed)}):")

@@ -112,43 +112,15 @@ echo  Installing Python packages...
 python -m pip install playwright httpx pillow gdown ttkbootstrap --quiet
 python -m playwright install chromium
 
-:: ── Install AE extension ──────────────────────────────────────
-echo.
-echo  Installing After Effects extension...
-set AE_BASE=C:\Program Files\Adobe
-set PANEL_SRC=%INSTALL_DIR%Lineup Panel.jsx
-set INSTALLED_AE=0
-
-if exist "%PANEL_SRC%" (
-    for /d %%D in ("%AE_BASE%\Adobe After Effects*") do (
-        set PANEL_DST=%%D\Support Files\Scripts\ScriptUI Panels
-        if exist "!PANEL_DST!" (
-            copy /y "%PANEL_SRC%" "!PANEL_DST!\" >nul 2>&1
-            if !errorlevel! equ 0 (
-                echo  [OK] Extension installed: %%D
-                set INSTALLED_AE=1
-            ) else (
-                echo  [WARNING] Could not copy to %%D ^(try running as Administrator^)
-            )
-        )
-    )
-    if !INSTALLED_AE! equ 0 (
-        echo  [INFO] After Effects not found in default location.
-        echo         Copy "Lineup Panel.jsx" manually to:
-        echo         AE folder\Support Files\Scripts\ScriptUI Panels\
-    )
-) else (
-    echo  [INFO] Lineup Panel.jsx not found, skipping AE extension.
-)
-
 :: ── Done ──────────────────────────────────────────────────────
 echo.
 echo  ============================================================
 echo    DONE! Everything is installed.
 echo.
 echo    To get started:
-echo      1. Open After Effects and load the .aep template
-echo      2. Run launcher.py to start the app
+echo      1. Run launcher.py to start the app
+echo      2. In After Effects: File ^> Scripts ^> Run Script File
+echo         and select "Lineup Panel.jsx" from this folder
 echo.
 echo    For help, reach out to Marian Grosu.
 echo  ============================================================

@@ -655,14 +655,17 @@ async def safe_goto(page, url: str, wait_until: str = "domcontentloaded",
     raise last_exc
 
 
-async def get_sofifa_team_roster(team_name: str, page) -> tuple:
+async def get_sofifa_team_roster(team_name: str, page,
+                                 match_type: str = "club") -> tuple:
     """
-    1. Cauta echipa pe sofifa.com/teams
+    1. Cauta echipa pe sofifa.com/teams (or /teams?type=national for national teams)
     2. Viziteaza pagina echipei
     3. Returneaza (team_id, [{name, kit, photo_url, player_url}])
     """
     # Common Flashscore short names → SoFIFA full names
+    # For national teams, SoFIFA uses country full names
     _SOFIFA_TEAM_ALIASES = {
+        # Club aliases
         "psg": "Paris Saint-Germain",
         "man city": "Manchester City",
         "man utd": "Manchester United",
@@ -716,9 +719,10 @@ async def get_sofifa_team_roster(team_name: str, page) -> tuple:
 
         href = None
         used_variant = team_name
+        type_filter = "&type=national" if match_type == "national" else ""
         for variant in search_variants:
             search_url = (f"https://sofifa.com/teams?keyword="
-                          f"{variant.replace(' ', '+')}&hl=en-US")
+                          f"{variant.replace(' ', '+')}{type_filter}&hl=en-US")
             await safe_goto(page, search_url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(600)
             href = await page.evaluate(JS_FIND_BEST, _norm(variant))
@@ -1413,12 +1417,14 @@ async def download_all_images(data: dict, images_only: bool = False,
             # ── 1. Incarca roster complet — pagina proaspata per echipa ──
             print(f"\n  SoFIFA: {home_team}...")
             sf_page = await ctx.new_page()
-            home_team_id, home_roster, home_logo_url = await get_sofifa_team_roster(home_team, sf_page)
+            home_team_id, home_roster, home_logo_url = await get_sofifa_team_roster(
+                home_team, sf_page, match_type=MATCH_TYPE)
             await sf_page.close()
 
             print(f"\n  SoFIFA: {away_team}...")
             sf_page = await ctx.new_page()
-            away_team_id, away_roster, away_logo_url = await get_sofifa_team_roster(away_team, sf_page)
+            away_team_id, away_roster, away_logo_url = await get_sofifa_team_roster(
+                away_team, sf_page, match_type=MATCH_TYPE)
             await sf_page.close()
 
             # ── 2. Descarca logo-uri echipe ───────────────────────────────

@@ -849,7 +849,7 @@ class App(_BASE_CLS):
         win = tk.Toplevel(self)
         win.title("Player SoFIFA URLs")
         win.geometry("900x620")
-        win.resizable(True, True)
+        win.resizable(False, False)
         win.grab_set()
 
         outer = ttk.Frame(win, padding=PAD)
@@ -862,8 +862,7 @@ class App(_BASE_CLS):
                       f"{match_info.get('away_score','')}  "
                       f"{match_info.get('away_team','')}")
         ttk.Label(outer, text=title_text, font=(UI, 14, "bold")).pack(anchor="w", pady=(0, 4))
-        ttk.Label(outer, text="Click a player → paste SoFIFA URL → Save Override  "
-                              "(downloads that player's photo automatically)",
+        ttk.Label(outer, text="Click a player → paste URL / edit Kit # → click outside to auto-save",
                   font=(UI, 10), foreground="#6e6e73").pack(anchor="w", pady=(0, PAD_S))
 
         # Treeview
@@ -939,8 +938,8 @@ class App(_BASE_CLS):
         ttk.Label(r_kit, text="Kit #:", font=(UI, 11), width=10,
                   anchor="w").pack(side="left", padx=(0, 8))
         kit_var = tk.StringVar()
-        ttk.Entry(r_kit, textvariable=kit_var, font=(UI, 11),
-                  width=6).pack(side="left", ipady=3, padx=(0, 8))
+        kit_entry = ttk.Entry(r_kit, textvariable=kit_var, font=(UI, 11), width=6)
+        kit_entry.pack(side="left", ipady=3, padx=(0, 8))
 
         def do_save_kit():
             name = sel_name_var.get().strip()
@@ -971,6 +970,8 @@ class App(_BASE_CLS):
             except Exception as e:
                 self._log(f"  ⚠ Cannot save data.json: {e}\n")
 
+        kit_entry.bind("<FocusOut>", lambda e: do_save_kit())
+        kit_entry.bind("<Return>",   lambda e: do_save_kit())
         ttk.Button(r_kit, text="Save Kit #", command=do_save_kit,
                    **self._btn_kw("primary")).pack(side="left")
 
@@ -980,8 +981,8 @@ class App(_BASE_CLS):
         ttk.Label(r2, text="SoFIFA URL:", font=(UI, 11), width=10,
                   anchor="w").pack(side="left", padx=(0, 8))
         new_url_var = tk.StringVar()
-        ttk.Entry(r2, textvariable=new_url_var, font=(UI, 11)
-                  ).pack(side="left", fill="x", expand=True, ipady=3, padx=(0, 8))
+        url_entry = ttk.Entry(r2, textvariable=new_url_var, font=(UI, 11))
+        url_entry.pack(side="left", fill="x", expand=True, ipady=3, padx=(0, 8))
 
         def on_tree_select(event=None):
             sel = tree.selection()
@@ -995,6 +996,8 @@ class App(_BASE_CLS):
             new_url_var.set(surl if surl and not surl.startswith("—") else "")
 
         tree.bind("<<TreeviewSelect>>", on_tree_select)
+        url_entry.bind("<FocusOut>", lambda e: do_save())
+        url_entry.bind("<Return>",   lambda e: do_save())
 
         def do_paste():
             try: new_url_var.set(win.clipboard_get().strip())

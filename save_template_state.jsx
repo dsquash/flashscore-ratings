@@ -11,6 +11,32 @@
  * ════════════════════════════════════════════════════════════════════════════════════════════
  */
 
+
+// JSON polyfill — ExtendScript (AE older versions) does not have native JSON
+if (typeof JSON !== "object" || JSON === null) { JSON = {}; }
+if (typeof JSON.parse !== "function") {
+    JSON.parse = function (text) { return eval("(" + String(text) + ")"); };
+}
+if (typeof JSON.stringify !== "function") {
+    JSON.stringify = function (o) {
+        if (o === null) return "null";
+        var t = typeof o;
+        if (t === "number" || t === "boolean") return String(o);
+        if (t === "string") return '"' + o.replace(/\/g,"\\").replace(/"/g,'\\"').replace(/\n/g,"\\n").replace(/\r/g,"\\r").replace(/\t/g,"\\t") + '"';
+        if (o instanceof Array) {
+            var a = [];
+            for (var i = 0; i < o.length; i++) a.push(JSON.stringify(o[i]));
+            return "[" + a.join(",") + "]";
+        }
+        if (t === "object") {
+            var b = [];
+            for (var k in o) if (o.hasOwnProperty(k)) b.push(JSON.stringify(k) + ":" + JSON.stringify(o[k]));
+            return "{" + b.join(",") + "}";
+        }
+        return "null";
+    };
+}
+
 var MAIN_COMP_NAME    = "MAIN COMP";
 var LAYER_HOME_TEAM   = "Home Team";
 var LAYER_AWAY_TEAM   = "Away Team";

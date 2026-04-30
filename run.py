@@ -923,18 +923,19 @@ async def get_sofifa_team_roster(team_name: str, page,
                 // Kit number — coloana identificata sau fallback primul numar mic
                 let kit = '';
                 const tds = row.querySelectorAll('td');
+                // 1. Try detected kit column
                 if (kitColIdx >= 0 && tds[kitColIdx]) {
                     const txt = (tds[kitColIdx].innerText || '').trim();
                     if (/^\\d{1,3}$/.test(txt)) kit = txt;
                 }
+                // 2. Scan all text-only cells for a number 1-99
                 if (!kit) {
-                    // Fallback SIGUR: verifica DOAR prima celula (col 0)
-                    // Pe SoFIFA, kit number este intotdeauna prima coloana
-                    // (col 1 are img+link, col 2 este varsta — de aceea nu iterez)
-                    if (tds[0] && !tds[0].querySelector('img, a')) {
-                        const txt = (tds[0].innerText || '').trim();
-                        if (/^\\d{1,2}$/.test(txt) && parseInt(txt) >= 1)
-                            kit = txt;
+                    for (var _ki = 0; _ki < tds.length; _ki++) {
+                        if (tds[_ki].querySelector('img, a')) continue;
+                        const txt = (tds[_ki].innerText || '').trim();
+                        if (/^\\d{1,2}$/.test(txt) && parseInt(txt) >= 1 && parseInt(txt) <= 99) {
+                            kit = txt; break;
+                        }
                     }
                 }
 
@@ -1024,14 +1025,18 @@ async def fetch_from_roster(name: str, roster: list, page,
                     }
                     let kit = '';
                     const body = document.body.innerText;
-                    // SoFIFA scrie "Kit Number Club 17" sau "Kit Number (Club): 17"
-                    const mClub = body.match(/Kit\\s*Number\\s*(?:\\(Club\\)|Club)[\\s:\\-\\t]*(\\d{1,3})/i);
-                    const mNat  = body.match(/Kit\\s*Number\\s*(?:\\(National\\)|National)[\\s:\\-\\t]*(\\d{1,3})/i);
+                    // Match "Kit Number" with optional Club/National qualifier, any separator
+                    const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
+                    const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
+                    // Flexible fallback: "Kit Number" then any non-digit chars then the number
+                    const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
                     if (matchType === 'national') {
                         if (mNat) kit = mNat[1];
                         else if (mClub) kit = mClub[1];
+                        else if (mAny) kit = mAny[1];
                     } else {
                         if (mClub) kit = mClub[1];
+                        else if (mAny && !mNat) kit = mAny[1];
                         else if (mNat) kit = mNat[1];
                     }
                     // Extract SoFIFA team ID from the club link (for team verification)
@@ -1126,14 +1131,18 @@ async def fetch_from_roster(name: str, roster: list, page,
                     }
                     let kit = '';
                     const body = document.body.innerText;
-                    // SoFIFA scrie "Kit Number Club 17" sau "Kit Number (Club): 17"
-                    const mClub = body.match(/Kit\\s*Number\\s*(?:\\(Club\\)|Club)[\\s:\\-\\t]*(\\d{1,3})/i);
-                    const mNat  = body.match(/Kit\\s*Number\\s*(?:\\(National\\)|National)[\\s:\\-\\t]*(\\d{1,3})/i);
+                    // Match "Kit Number" with optional Club/National qualifier, any separator
+                    const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
+                    const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
+                    // Flexible fallback: "Kit Number" then any non-digit chars then the number
+                    const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
                     if (matchType === 'national') {
                         if (mNat) kit = mNat[1];
                         else if (mClub) kit = mClub[1];
+                        else if (mAny) kit = mAny[1];
                     } else {
                         if (mClub) kit = mClub[1];
+                        else if (mAny && !mNat) kit = mAny[1];
                         else if (mNat) kit = mNat[1];
                     }
                     // Extract SoFIFA team ID from the club link (for team verification)
@@ -1225,14 +1234,16 @@ async def fetch_from_roster(name: str, roster: list, page,
                 }
                 let kit = '';
                 const body = document.body.innerText;
-                // SoFIFA scrie "Kit Number Club 17" sau "Kit Number (Club): 17"
-                const mClub = body.match(/Kit\\s*Number\\s*(?:\\(Club\\)|Club)[\\s:\\-\\t]*(\\d{1,3})/i);
-                const mNat  = body.match(/Kit\\s*Number\\s*(?:\\(National\\)|National)[\\s:\\-\\t]*(\\d{1,3})/i);
+                const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
+                const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
+                const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
                 if (matchType === 'national') {
                     if (mNat) kit = mNat[1];
                     else if (mClub) kit = mClub[1];
+                    else if (mAny) kit = mAny[1];
                 } else {
                     if (mClub) kit = mClub[1];
+                    else if (mAny && !mNat) kit = mAny[1];
                     else if (mNat) kit = mNat[1];
                 }
                 // Extract SoFIFA team ID from the club link (for team verification)

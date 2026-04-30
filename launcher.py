@@ -108,9 +108,8 @@ class App(_BASE_CLS):
             self._setup_plain_ttk_style()
 
         self.title("Flashscore Ratings")
-        self.resizable(True, True)
-        self.minsize(600, 520)
-        self.geometry("820x660")
+        self.resizable(False, False)
+        self.geometry("680x580")
 
         self._proc            = None
         self._running         = False
@@ -847,6 +846,11 @@ class App(_BASE_CLS):
         win.title("Player SoFIFA URLs")
         win.resizable(False, False)
         win.grab_set()
+        # Fixed geometry based on column widths: 90+150+38+450+80 = 808 + scrollbar + padding
+        sw = win.winfo_screenwidth(); sh = win.winfo_screenheight()
+        w = min(960, int(sw * 0.90)); h = min(780, int(sh * 0.86))
+        x = (sw - w) // 2; y = max(30, (sh - h) // 4)
+        win.geometry(f"{w}x{h}+{x}+{y}")
 
         outer = ttk.Frame(win, padding=PAD)
         outer.pack(fill="both", expand=True)
@@ -1036,19 +1040,6 @@ class App(_BASE_CLS):
                    **self._btn_kw("secondary-outline" if _BOOT else "secondary")
                    ).pack(side="right")
 
-        # Auto-size window to fit all content (after all widgets are built)
-        def _auto_size():
-            win.update_idletasks()
-            w = win.winfo_reqwidth() + 24
-            h = win.winfo_reqheight() + 24
-            sw = win.winfo_screenwidth()
-            sh = win.winfo_screenheight()
-            w = min(w, int(sw * 0.95))
-            h = min(h, int(sh * 0.88))
-            x = (sw - w) // 2
-            y = max(40, (sh - h) // 4)
-            win.geometry(f"{w}x{h}+{x}+{y}")
-        win.after(1, _auto_size)
 
 
 if __name__ == "__main__":

@@ -302,12 +302,6 @@ var playerGlobalIdx = 0;
               "Make sure the score text layer is named exactly: " + LAYER_SCORE);
     }
 
-    // ── Reseteaza playhead la inceputul compositiei ──────────
-    try {
-        mainComp.openInViewer();
-        app.executeCommand(2003); // Go to Beginning (frame 0)
-    } catch(e) {}
-
     // ── Sterge layerele vechi ────────────────────────────────
     clearOldLayers(mainComp);
 

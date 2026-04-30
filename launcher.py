@@ -109,7 +109,7 @@ class App(_BASE_CLS):
 
         self.title("Flashscore Ratings")
         self.resizable(False, False)
-        self.geometry("680x580")
+        self.geometry("820x700")
 
         self._proc            = None
         self._running         = False

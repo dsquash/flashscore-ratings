@@ -39,7 +39,13 @@ if (typeof JSON.stringify !== "function") {
         if (o === null) return "null";
         var t = typeof o;
         if (t === "number" || t === "boolean") return String(o);
-        if (t === "string") return '"' + o.replace(/\/g,"\\").replace(/"/g,'\\"').replace(/\n/g,"\\n").replace(/\r/g,"\\r").replace(/\t/g,"\\t") + '"';
+        if (t === "string") {
+            return '"' + o.split("\\").join("\\\\")
+                          .split('"').join('\\"')
+                          .split("\n").join("\\n")
+                          .split("\r").join("\\r")
+                          .split("\t").join("\\t") + '"';
+        }
         if (o instanceof Array) {
             var a = [];
             for (var i = 0; i < o.length; i++) a.push(JSON.stringify(o[i]));

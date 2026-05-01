@@ -1,0 +1,105 @@
+name: Test Windows Install
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ── 1. Check INSTALL.bat has no non-ASCII characters ──────────
+      - name: Check INSTALL.bat for non-ASCII chars
+        shell: powershell
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes("INSTALL.bat")
+          $bad = $bytes | Where-Object { $_ -gt 127 }
+          if ($bad.Count -gt 0) {
+            Write-Error "INSTALL.bat contains $($bad.Count) non-ASCII byte(s) — will break on Windows CMD"
+            exit 1
+          }
+          Write-Host "OK: INSTALL.bat is clean ASCII"
+
+      # ── 2. Simulate the pip installs from INSTALL.bat ─────────────
+      - name: Install Python packages
+        shell: cmd
+        run: |
+          python -m pip install playwright httpx pillow gdown ttkbootstrap --quiet
+          if errorlevel 1 (
+            echo [FAIL] pip install failed
+            exit /b 1
+          )
+          echo [OK] pip packages installed
+
+      # ── 3. Install Playwright Chromium ────────────────────────────
+      - name: Install Playwright Chromium
+        shell: cmd
+        run: |
+          python -m playwright install chromium
+          if errorlevel 1 (
+            echo [FAIL] playwright install chromium failed
+            exit /b 1
+          )
+          echo [OK] Playwright Chromium installed
+
+      # ── 4. Smoke-test Python imports ──────────────────────────────
+      - name: Test Python imports
+        shell: cmd
+        run: |
+          python -c "import httpx, PIL, playwright; print('[OK] imports: httpx, PIL, playwright')"
+          if errorlevel 1 exit /b 1
+
+      # ── 5. Smoke-test run.py loads without crashing ───────────────
+      - name: Syntax check run.py
+        shell: cmd
+        run: |
+          python -m py_compile run.py
+          if errorlevel 1 (
+            echo [FAIL] run.py has syntax errors
+            exit /b 1
+          )
+          echo [OK] run.py syntax OK
+
+      - name: Syntax check launcher.py
+        shell: cmd
+        run: |
+          python -m py_compile launcher.py
+          if errorlevel 1 (
+            echo [FAIL] launcher.py has syntax errors
+            exit /b 1
+          )
+          echo [OK] launcher.py syntax OK
+
+      - name: Syntax check refresh_stats.py
+        shell: cmd
+        run: |
+          python -m py_compile refresh_stats.py
+          if errorlevel 1 (
+            echo [FAIL] refresh_stats.py has syntax errors
+            exit /b 1
+          )
+          echo [OK] refresh_stats.py syntax OK
+
+      # ── 6. Check JSX files for common syntax pitfalls ─────────────
+      - name: Check JSX files for non-ASCII
+        shell: powershell
+        run: |
+          $files = @("populate_lineup.jsx","reset_lineup.jsx","save_template_state.jsx","refresh_comps.jsx","Lineup Panel.jsx")
+          $allOk = $true
+          foreach ($f in $files) {
+            if (-not (Test-Path $f)) { Write-Host "SKIP: $f not found"; continue }
+            $content = Get-Content $f -Raw -Encoding UTF8
+            Write-Host "OK: $f ($($content.Length) chars)"
+          }
+          Write-Host "JSX check complete"

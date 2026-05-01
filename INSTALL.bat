@@ -1,60 +1,55 @@
 @echo off
-chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-:: ============================================================
-::   Flashscore Ratings — Installer
-::   Downloads the app from GitHub + AE template from Drive
-:: ============================================================
+REM ============================================================
+REM   Flashscore Ratings -- Installer
+REM   Downloads the app from GitHub + AE template from Drive
+REM ============================================================
 
 set GITHUB_ZIP=https://github.com/dsquash/flashscore-ratings/archive/refs/heads/main.zip
 
-:: ── Google Drive folder with the AE template ────────────────
+REM -- Google Drive folder with the AE template
 set GDRIVE_FOLDER_ID=1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti
-:: ────────────────────────────────────────────────────────────
 
 set INSTALL_DIR=%~dp0
 set TEMP_ZIP=%TEMP%\flashscore_code.zip
 
 echo.
 echo  ============================================================
-echo    Flashscore Ratings — Installer
+echo    Flashscore Ratings -- Installer
 echo  ============================================================
 echo.
 
-:: ── Check / Install Python ───────────────────────────────────
+REM -- Check / Install Python
 python --version >nul 2>&1
 if errorlevel 1 (
     echo  [INFO] Python not found. Attempting automatic install...
     echo.
 
-    :: Try winget first (available on Windows 10/11)
+    REM Try winget first (available on Windows 10/11)
     winget --version >nul 2>&1
     if not errorlevel 1 (
         echo  Installing Python via winget...
         winget install --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
-        :: Refresh PATH so python is visible immediately
-        call refreshenv >nul 2>&1
+        REM Refresh PATH so python is visible immediately
         set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts"
     )
 
-    :: Check again after winget attempt
+    REM Check again after winget attempt
     python --version >nul 2>&1
     if errorlevel 1 (
         echo.
         echo  [INFO] Winget install did not work. Downloading Python installer...
-        set PY_INSTALLER=%TEMP%\python_installer.exe
-        powershell -NoProfile -Command ^
-          "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe' -OutFile '%TEMP%\python_installer.exe' -UseBasicParsing"
+        powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe' -OutFile '%TEMP%\python_installer.exe' -UseBasicParsing"
         echo.
-        echo  Running Python installer — check "Add Python to PATH" and click Install Now.
+        echo  Running Python installer -- check "Add Python to PATH" and click Install Now.
         "%TEMP%\python_installer.exe" /passive PrependPath=1 Include_pip=1
         del "%TEMP%\python_installer.exe" >nul 2>&1
-        :: Refresh PATH
+        REM Refresh PATH
         set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts"
     )
 
-    :: Final check
+    REM Final check
     python --version >nul 2>&1
     if errorlevel 1 (
         echo.
@@ -68,29 +63,27 @@ if errorlevel 1 (
 )
 echo  [OK] Python found.
 
-:: ── Download code from GitHub ─────────────────────────────────
+REM -- Download code from GitHub
 echo.
 echo  [1/4] Downloading app from GitHub...
-powershell -NoProfile -Command ^
-  "try { Invoke-WebRequest -Uri '%GITHUB_ZIP%' -OutFile '%TEMP_ZIP%' -UseBasicParsing; Write-Host 'OK' } catch { Write-Host ('FAIL: ' + $_.Exception.Message); exit 1 }"
+powershell -NoProfile -Command "try { Invoke-WebRequest -Uri '%GITHUB_ZIP%' -OutFile '%TEMP_ZIP%' -UseBasicParsing; Write-Host 'OK' } catch { Write-Host ('FAIL: ' + $_.Exception.Message); exit 1 }"
 if errorlevel 1 (
     echo  [ERROR] Could not download from GitHub. Check your internet connection.
     pause
     exit /b 1
 )
 
-:: ── Extract code ──────────────────────────────────────────────
+REM -- Extract code
 echo  [2/4] Extracting app files...
-powershell -NoProfile -Command ^
-  "Expand-Archive -Path '%TEMP_ZIP%' -DestinationPath '%TEMP%\flashscore_extract' -Force"
+powershell -NoProfile -Command "Expand-Archive -Path '%TEMP_ZIP%' -DestinationPath '%TEMP%\flashscore_extract' -Force"
 
-:: Move files from the extracted subfolder to install dir
+REM Move files from the extracted subfolder to install dir
 xcopy /e /i /y "%TEMP%\flashscore_extract\flashscore-ratings-main\*" "%INSTALL_DIR%" >nul
 rmdir /s /q "%TEMP%\flashscore_extract" >nul 2>&1
 del "%TEMP_ZIP%" >nul 2>&1
 echo  [OK] App files installed.
 
-:: ── Download AE template from Google Drive (folder) ──────────
+REM -- Download AE template from Google Drive (folder)
 echo.
 echo  [3/4] Downloading After Effects template from Google Drive...
 python -m pip install gdown --quiet
@@ -104,15 +97,13 @@ if errorlevel 1 (
     echo  [OK] After Effects template downloaded.
 )
 
-:after_template
-
-:: ── Install Python packages + Chromium ───────────────────────
+REM -- Install Python packages + Chromium
 echo.
-echo  Installing Python packages...
+echo  [4/4] Installing Python packages...
 python -m pip install playwright httpx pillow gdown ttkbootstrap --quiet
 python -m playwright install chromium
 
-:: ── Done ──────────────────────────────────────────────────────
+REM -- Done
 echo.
 echo  ============================================================
 echo    DONE! Everything is installed.

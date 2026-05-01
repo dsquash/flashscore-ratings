@@ -26,7 +26,7 @@ jobs:
           $bytes = [System.IO.File]::ReadAllBytes("INSTALL.bat")
           $bad = $bytes | Where-Object { $_ -gt 127 }
           if ($bad.Count -gt 0) {
-            Write-Error "INSTALL.bat contains $($bad.Count) non-ASCII byte(s) — will break on Windows CMD"
+            Write-Error "INSTALL.bat contains $($bad.Count) non-ASCII byte(s) - will break on Windows CMD"
             exit 1
           }
           Write-Host "OK: INSTALL.bat is clean ASCII"

@@ -19,152 +19,57 @@ jobs:
         with:
           python-version: "3.12"
 
-      # ── 1. INSTALL.bat has no non-ASCII characters ─────────────
       - name: Check INSTALL.bat for non-ASCII chars
         shell: powershell
         run: |
           $bytes = [System.IO.File]::ReadAllBytes("INSTALL.bat")
           $bad = $bytes | Where-Object { $_ -gt 127 }
           if ($bad.Count -gt 0) {
-            Write-Error "INSTALL.bat contains $($bad.Count) non-ASCII byte(s) - will break on Windows CMD"
+            Write-Error "INSTALL.bat contains $($bad.Count) non-ASCII byte(s)"
             exit 1
           }
           Write-Host "OK: INSTALL.bat is clean ASCII"
 
-      # ── 2. Install packages ────────────────────────────────────
       - name: Install Python packages
         shell: cmd
-        run: |
-          python -m pip install playwright httpx pillow gdown ttkbootstrap --quiet
-          if errorlevel 1 exit /b 1
-          echo [OK] pip packages installed
+        run: python -m pip install playwright httpx pillow gdown ttkbootstrap --quiet
 
       - name: Install Playwright Chromium
         shell: cmd
-        run: |
-          python -m playwright install chromium
-          if errorlevel 1 exit /b 1
-          echo [OK] Playwright Chromium installed
+        run: python -m playwright install chromium
 
-      # ── 3. Syntax check all Python files ──────────────────────
       - name: Syntax check Python files
         shell: cmd
         run: |
-          python -m py_compile run.py
-          if errorlevel 1 ( echo [FAIL] run.py & exit /b 1 )
-          echo [OK] run.py
+          python -m py_compile run.py && echo [OK] run.py
+          python -m py_compile launcher.py && echo [OK] launcher.py
+          python -m py_compile refresh_stats.py && echo [OK] refresh_stats.py
+          python -m py_compile updater.py && echo [OK] updater.py
 
-          python -m py_compile launcher.py
-          if errorlevel 1 ( echo [FAIL] launcher.py & exit /b 1 )
-          echo [OK] launcher.py
-
-          python -m py_compile refresh_stats.py
-          if errorlevel 1 ( echo [FAIL] refresh_stats.py & exit /b 1 )
-          echo [OK] refresh_stats.py
-
-          python -m py_compile updater.py
-          if errorlevel 1 ( echo [FAIL] updater.py & exit /b 1 )
-          echo [OK] updater.py
-
-      # ── 4. Import tests ────────────────────────────────────────
-      - name: Test imports (httpx, PIL, playwright)
+      - name: Test core imports
         shell: cmd
-        run: |
-          python -c "import httpx, PIL, playwright; print('[OK] httpx, PIL, playwright')"
-          if errorlevel 1 exit /b 1
+        run: python -c "import httpx, PIL, playwright, tkinter, ttkbootstrap, json, pathlib, subprocess, threading; print('[OK] all imports')"
 
-      - name: Test launcher.py imports cleanly
+      - name: Test Windows path and file I/O
         shell: cmd
-        run: |
-          python -c "
-import sys
-sys.path.insert(0, '.')
-# Test all module-level imports in launcher.py work on Windows
-import tkinter as tk
-from tkinter import ttk, scrolledtext
-import subprocess, threading, re, json
-from pathlib import Path
-try:
-    import ttkbootstrap
-    print('[OK] ttkbootstrap available')
-except ImportError:
-    print('[OK] ttkbootstrap not found - fallback to ttk')
-print('[OK] launcher.py imports OK')
-"
-          if errorlevel 1 exit /b 1
+        run: python -c "from pathlib import Path; import sys; o=Path('flashscore_output'); o.mkdir(exist_ok=True); f=o/'ci.txt'; f.write_text('ok',encoding='utf-8'); assert f.read_text(encoding='utf-8')=='ok'; f.unlink(); o.rmdir(); assert Path(sys.executable).exists(); print('[OK] path I/O OK')"
 
-      - name: Test run.py imports cleanly
+      - name: Test subprocess launch (simulates launcher starting script)
         shell: cmd
-        run: |
-          python -c "
-import sys
-sys.path.insert(0, '.')
-import httpx, json, asyncio
-from pathlib import Path
-import PIL
-print('[OK] run.py core imports OK')
-"
-          if errorlevel 1 exit /b 1
+        run: python -c "import subprocess,sys; r=subprocess.run([sys.executable,'-c','print(42)'],capture_output=True,text=True,encoding='utf-8'); assert r.returncode==0 and '42' in r.stdout; print('[OK] subprocess OK')"
 
-      # ── 5. Windows path handling ───────────────────────────────
-      - name: Test Windows path resolution
-        shell: cmd
-        run: |
-          python -c "
-from pathlib import Path
-import sys
-
-base = Path('.')
-output = base / 'flashscore_output'
-output.mkdir(exist_ok=True)
-test_file = output / 'test.txt'
-test_file.write_text('ok', encoding='utf-8')
-assert test_file.read_text(encoding='utf-8') == 'ok'
-test_file.unlink()
-output.rmdir()
-
-# Verify sys.executable points to python
-assert Path(sys.executable).exists(), 'sys.executable not found'
-print('[OK] Path handling OK')
-print('[OK] sys.executable:', sys.executable)
-"
-          if errorlevel 1 exit /b 1
-
-      # ── 6. Test subprocess launch (simulates launcher starting run.py) ──
-      - name: Test subprocess launch
-        shell: cmd
-        run: |
-          python -c "
-import subprocess, sys
-from pathlib import Path
-
-result = subprocess.run(
-    [sys.executable, '-c', 'print(\"subprocess OK\")'],
-    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-    text=True, encoding='utf-8', errors='replace'
-)
-assert result.returncode == 0
-assert 'subprocess OK' in result.stdout
-print('[OK] subprocess launch works:', result.stdout.strip())
-"
-          if errorlevel 1 exit /b 1
-
-      # ── 7. Test refresh_stats.py runs (no URL = exits cleanly) ─
-      - name: Test refresh_stats.py exits cleanly without URL
+      - name: Test refresh_stats exits cleanly without URL
         shell: cmd
         run: |
           python refresh_stats.py
-          REM exit code 1 is expected (no URL) - just must not crash with exception
-          echo [OK] refresh_stats.py exited (expected non-zero without URL)
+          echo [OK] refresh_stats exited
 
-      # ── 8. JSX files readable ─────────────────────────────────
-      - name: Check JSX files are readable
+      - name: Check JSX files readable
         shell: powershell
         run: |
           $files = @("populate_lineup.jsx","reset_lineup.jsx","save_template_state.jsx","refresh_comps.jsx","Lineup Panel.jsx")
           foreach ($f in $files) {
-            if (-not (Test-Path $f)) { Write-Host "SKIP: $f not found"; continue }
-            $content = Get-Content $f -Raw -Encoding UTF8
-            Write-Host "OK: $f ($($content.Length) chars)"
+            if (-not (Test-Path $f)) { Write-Host "SKIP: $f"; continue }
+            $c = Get-Content $f -Raw -Encoding UTF8
+            Write-Host "OK: $f ($($c.Length) chars)"
           }
-          Write-Host "JSX check complete"

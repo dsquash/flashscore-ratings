@@ -10,6 +10,7 @@ set GITHUB_ZIP=https://github.com/dsquash/flashscore-ratings/archive/refs/heads/
 
 REM -- Google Drive folder with the AE template
 set GDRIVE_FOLDER_ID=1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti
+set GDRIVE_URL=https://drive.google.com/drive/folders/1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti
 
 set INSTALL_DIR=%~dp0
 set TEMP_ZIP=%TEMP%\flashscore_code.zip
@@ -83,25 +84,31 @@ rmdir /s /q "%TEMP%\flashscore_extract" >nul 2>&1
 del "%TEMP_ZIP%" >nul 2>&1
 echo  [OK] App files installed.
 
-REM -- Download AE template from Google Drive (folder)
+REM -- Install Python packages FIRST (needed for gdown below)
 echo.
-echo  [3/4] Downloading After Effects template from Google Drive...
-python -m pip install gdown --quiet
-python -m gdown --folder "%GDRIVE_FOLDER_ID%" -O "%INSTALL_DIR%" --quiet 2>nul
-
+echo  [3/4] Installing Python packages...
+python -m pip install playwright httpx pillow gdown ttkbootstrap --quiet
 if errorlevel 1 (
-    echo  [WARNING] Could not download AE template automatically.
-    echo            Download it manually from:
-    echo            https://drive.google.com/drive/folders/%GDRIVE_FOLDER_ID%
+    echo  [WARNING] Some packages may not have installed correctly.
+)
+python -m playwright install chromium
+echo  [OK] Python packages installed.
+
+REM -- Download AE template from Google Drive
+echo.
+echo  [4/4] Downloading After Effects template from Google Drive...
+python -m gdown --folder "%GDRIVE_FOLDER_ID%" -O "%INSTALL_DIR%"
+if errorlevel 1 (
+    echo.
+    echo  [WARNING] Automatic download failed.
+    echo           Opening Google Drive in your browser -- please download manually.
+    echo           Save the files into this folder:
+    echo           %INSTALL_DIR%
+    echo.
+    start "" "%GDRIVE_URL%"
 ) else (
     echo  [OK] After Effects template downloaded.
 )
-
-REM -- Install Python packages + Chromium
-echo.
-echo  [4/4] Installing Python packages...
-python -m pip install playwright httpx pillow gdown ttkbootstrap --quiet
-python -m playwright install chromium
 
 REM -- Done
 echo.

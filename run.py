@@ -1365,18 +1365,26 @@ async def fetch_from_roster(name: str, roster: list, page,
             await page.wait_for_timeout(1200)
             # Extract first sofifa.com/player/ link from Google results
             _g_player_url = await page.evaluate("""() => {
+                // Method 1: scan all <a> tags
                 const links = document.querySelectorAll('a[href]');
                 for (const a of links) {
                     const h = a.href || '';
-                    if (h.includes('sofifa.com/player/')) {
-                        // Strip Google redirect wrapper if present
-                        const clean = h.split('?')[0].split('&')[0];
-                        return clean;
+                    // Google wraps results: google.com/url?q=https://sofifa.com/...
+                    if (h.includes('google.com/url')) {
+                        try {
+                            const q = new URL(h).searchParams.get('q') || '';
+                            if (q.includes('sofifa.com/player/')) return q.split('?')[0];
+                        } catch(e) {}
                     }
+                    // Direct sofifa link
+                    if (h.includes('sofifa.com/player/')) return h.split('?')[0];
                 }
-                // Fallback: scan all text on page for sofifa.com/player/ URLs
-                const m = document.body.innerHTML.match(/sofifa\\.com\\/player\\/[a-zA-Z0-9/_\\-]+/);
-                return m ? 'https://' + m[0] : null;
+                // Method 2: scan raw HTML for any sofifa.com/player/ occurrence
+                const m = document.body.innerHTML.match(/https?:\/\/sofifa\\.com\/player\/[a-zA-Z0-9\\/_\\-]+/);
+                if (m) return m[0].split('?')[0];
+                // Method 3: look for sofifa.com/player/ without protocol
+                const m2 = document.body.innerHTML.match(/sofifa\\.com\/player\/[a-zA-Z0-9\\/_\\-]+/);
+                return m2 ? 'https://' + m2[0].split('?')[0] : null;
             }""")
             if _g_player_url and 'sofifa.com/player/' in _g_player_url:
                 await safe_goto(page, _g_player_url, timeout=35000)

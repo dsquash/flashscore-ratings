@@ -643,6 +643,8 @@ class App(_BASE_CLS):
         if available:
             self._show_update_banner(local, remote)
         else:
+            self.status_var.set(f"✓ You're up to date (v{local})")
+        else:
             msg = "Could not reach GitHub." if remote == "?" else f"Already up to date (v{local})."
             self.status_var.set(msg)
 

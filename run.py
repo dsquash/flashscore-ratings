@@ -1260,6 +1260,7 @@ async def fetch_from_roster(name: str, roster: list, page,
         pg2 = None
         _DS_JS = """(searchName) => {
             const rows = document.querySelectorAll('table tbody tr');
+            if (rows.length === 0) return { _debug: 'no_rows', _url: window.location.href };
             let best = null, bestScore = -1;
             const norm = s => s.toLowerCase().normalize('NFD')
                 .replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9 ]/g,'');
@@ -1287,8 +1288,11 @@ async def fetch_from_roster(name: str, roster: list, page,
             for _tf in _team_filter_opts:
                 search_url = f"https://sofifa.com/players?keyword={kw}{_tf}&hl=en-US"
                 await safe_goto(page, search_url, timeout=35000)
-                await page.wait_for_timeout(300)
+                await page.wait_for_timeout(1500)
                 pg2 = await page.evaluate(_DS_JS, clean)
+                if isinstance(pg2, dict) and pg2.get('_debug') == 'no_rows':
+                    print(f"[0 rows, url={pg2.get('_url','?')[:60]}]", end=" ", flush=True)
+                    pg2 = None
                 if pg2:
                     break
             if pg2:

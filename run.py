@@ -1221,7 +1221,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                         for (const img of document.querySelectorAll('img')) {
                             const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
                             for (const src of candidates) {
-                                const m = src.match(/\/players\/(\d+)\/(\d+)\//);
+                                const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
                                 if (m && parseInt(m[1]) > 0) {
                                     photoUrl = src.replace('_120.png','_240.png').replace('_60.png','_240.png');
                                     break;
@@ -1231,9 +1231,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                         }
                         let kit = '';
                         const body = document.body.innerText;
-                        const mClub = body.match(/Kit[\s·]*Number[\s\S]{0,40}?Club[^0-9]{0,15}?(\d{1,3})/i);
-                        const mNat  = body.match(/Kit[\s·]*Number[\s\S]{0,40}?National[^0-9]{0,15}?(\d{1,3})/i);
-                        const mAny  = body.match(/Kit[\s·]*Number[^0-9\n]{0,30}?(\d{1,3})/i);
+                        const mClub = body.match(/Kit[\\s·]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
+                        const mNat  = body.match(/Kit[\\s·]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
+                        const mAny  = body.match(/Kit[\\s·]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
                         if (matchType === 'national') {
                             kit = (mNat||mClub||mAny||[])[1] || '';
                         } else {
@@ -1520,7 +1520,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                 const hits = (document.body.innerHTML.match(rx) || []);
                 if (hits.length) return hits[0].split('?')[0];
                 // Also scan for encoded sofifa URLs in bing tracking links
-                const rxEnc = /sofifa\.com%2Fplayer%2F[a-zA-Z0-9%_-]+/g;
+                const rxEnc = /sofifa[.]com%2Fplayer%2F[a-zA-Z0-9%_-]+/g;
                 const hitsEnc = (document.body.innerHTML.match(rxEnc) || []);
                 if (hitsEnc.length) return 'https://' + decodeURIComponent(hitsEnc[0].split('%3F')[0]);
                 return null;
@@ -1562,7 +1562,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                     for (const img of document.querySelectorAll('img')) {
                         const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
                         for (const src of candidates) {
-                            const m = src.match(/\/players\/(\d+)\/(\d+)\//);
+                            const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
                             if (m && parseInt(m[1]) > 0) {
                                 photoUrl = src.replace('_120.png','_240.png').replace('_60.png','_240.png');
                                 break;
@@ -1572,9 +1572,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                     }
                     let kit = '';
                     const body = document.body.innerText;
-                    const mClub = body.match(/Kit[\s·]*Number[\s\S]{0,40}?Club[^0-9]{0,15}?(\d{1,3})/i);
-                    const mNat  = body.match(/Kit[\s·]*Number[\s\S]{0,40}?National[^0-9]{0,15}?(\d{1,3})/i);
-                    const mAny  = body.match(/Kit[\s·]*Number[^0-9\n]{0,30}?(\d{1,3})/i);
+                    const mClub = body.match(/Kit[\\s·]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
+                    const mNat  = body.match(/Kit[\\s·]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
+                    const mAny  = body.match(/Kit[\\s·]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
                     if (matchType === 'national') {
                         if (mNat) kit = mNat[1];
                         else if (mClub) kit = mClub[1];

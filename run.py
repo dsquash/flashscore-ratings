@@ -970,7 +970,8 @@ def _load_overrides() -> dict:
 async def fetch_from_roster(name: str, roster: list, page,
                              client: httpx.AsyncClient, is_sub: bool = False,
                              overrides: dict = None, match_type: str = "club",
-                             flashscore_url: str = "", team_id: int = 0):
+                             flashscore_url: str = "", team_id: int = 0,
+                             team_name: str = ""):
     """
     Cauta jucatorul in roster-ul pre-incarcat al echipei.
     - is_sub=True: INTOTDEAUNA viziteaza pagina jucatorului pentru kit number
@@ -1352,6 +1353,86 @@ async def fetch_from_roster(name: str, roster: list, page,
         except Exception as e5:
             print(f"[fs_fullname exc: {e5}]", end=" ", flush=True)
 
+    # ── 6. Fallback: DuckDuckGo search "{name} {team} sofifa" ────────────
+    if not photo_raw:
+        import re as _re6, urllib.parse as _up6
+        # Build search query: "Mauricio Palmeiras sofifa"
+        _team_hint = team_name.strip() if team_name else ""
+        _ddg_query = f"{clean} {_team_hint} sofifa".strip() if _team_hint else f"{clean} sofifa"
+        _ddg_encoded = _up6.quote_plus(_ddg_query)
+        _ddg_url = f"https://html.duckduckgo.com/html/?q={_ddg_encoded}"
+        print(f"\n        [ddg search] {_ddg_query}...", end=" ", flush=True)
+        try:
+            _r_ddg = await client.get(
+                _ddg_url,
+                headers={**hdrs, "Accept": "text/html"},
+                timeout=15,
+                follow_redirects=True
+            )
+            # Extract first sofifa.com/player/ URL from results
+            _sofifa_match = _re6.search(
+                r'https?://sofifa\.com/player/[a-zA-Z0-9/_\-]+',
+                _r_ddg.text
+            )
+            if not _sofifa_match:
+                # DDG sometimes encodes URLs — try uddg= param
+                _uddg = _re6.search(r'uddg=([^&"]+)', _r_ddg.text)
+                if _uddg:
+                    _decoded = _up6.unquote(_uddg.group(1))
+                    if 'sofifa.com/player/' in _decoded:
+                        _sofifa_match = _re6.search(
+                            r'https?://sofifa\.com/player/[a-zA-Z0-9/_\-]+',
+                            _decoded
+                        )
+            if _sofifa_match:
+                _ddg_player_url = _sofifa_match.group(0).rstrip('/')
+                await safe_goto(page, _ddg_player_url, timeout=35000)
+                await page.wait_for_timeout(600)
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_timeout(400)
+                await page.evaluate("window.scrollTo(0, 0)")
+                _pg_ddg = await page.evaluate("""(matchType) => {
+                    let photoUrl = '';
+                    for (const img of document.querySelectorAll('img')) {
+                        const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
+                        for (const src of candidates) {
+                            const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
+                            if (m && parseInt(m[1]) > 0) {
+                                photoUrl = src.replace('_120.png','_240.png').replace('_60.png','_240.png');
+                                break;
+                            }
+                        }
+                        if (photoUrl) break;
+                    }
+                    let kit = '';
+                    const body = document.body.innerText;
+                    const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
+                    const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
+                    const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
+                    if (matchType === 'national') {
+                        if (mNat) kit = mNat[1];
+                        else if (mClub) kit = mClub[1];
+                        else if (mAny) kit = mAny[1];
+                    } else {
+                        if (mClub) kit = mClub[1];
+                        else if (mAny && !mNat) kit = mAny[1];
+                        else if (mNat) kit = mNat[1];
+                    }
+                    return { photoUrl, kit };
+                }""", match_type) or {}
+                if _pg_ddg.get('kit'):
+                    kit = _pg_ddg['kit']
+                if _pg_ddg.get('photoUrl'):
+                    _r7 = await client.get(
+                        _pg_ddg['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
+                    )
+                    if _r7.status_code == 200 and len(_r7.content) > 300:
+                        return _r7.content, kit, "ddg_search", _ddg_player_url
+            else:
+                print(f"[no sofifa link in ddg results]", end=" ", flush=True)
+        except Exception as _e6:
+            print(f"[ddg exc: {_e6}]", end=" ", flush=True)
+
     # Pastreaza kit-ul gasit (din roster / pagina jucatorului) chiar daca poza a esuat
     return None, kit, None, (best.get('playerUrl', '') if best else '')
 
@@ -1553,14 +1634,14 @@ async def download_all_images(data: dict, images_only: bool = False,
                     print(f"  ⚠ Logo {filename}: not found")
 
             groups = [
-                (data["home"]["players"],     "home_player", home_roster, home_team_id),
-                (data["away"]["players"],     "away_player", away_roster, away_team_id),
-                (data["home"]["substitutes"], "home_sub",    home_roster, home_team_id),
-                (data["away"]["substitutes"], "away_sub",    away_roster, away_team_id),
+                (data["home"]["players"],     "home_player", home_roster, home_team_id, home_team),
+                (data["away"]["players"],     "away_player", away_roster, away_team_id, away_team),
+                (data["home"]["substitutes"], "home_sub",    home_roster, home_team_id, home_team),
+                (data["away"]["substitutes"], "away_sub",    away_roster, away_team_id, away_team),
             ]
 
             # ── 3. Per jucator: match in roster → descarca foto ──────────
-            for players, prefix, roster, _tid in groups:
+            for players, prefix, roster, _tid, _tname in groups:
                 is_sub = prefix.endswith("_sub")
                 for i, p in enumerate(players, 1):
                     name = p.get("name", "").strip()
@@ -1629,7 +1710,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                             name, roster, page, client, is_sub=is_sub,
                             overrides=overrides, match_type=MATCH_TYPE,
                             flashscore_url=p.get("flashscore_url", ""),
-                            team_id=_tid
+                            team_id=_tid, team_name=_tname
                         )
                     except BaseException as e:
                         print(f"\n      ⚠ Crash '{name}': {type(e).__name__}: {e}")

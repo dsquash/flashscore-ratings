@@ -1353,40 +1353,55 @@ async def fetch_from_roster(name: str, roster: list, page,
         except Exception as e5:
             print(f"[fs_fullname exc: {e5}]", end=" ", flush=True)
 
-    # ── 6. Fallback: Google search "{name} {team} sofifa" via playwright ──
+    # ── 6. Fallback: search "{name} {team} sofifa" via Bing then Google ──
     if not photo_raw:
         import urllib.parse as _up6
-        _team_hint = team_name.strip() if team_name else ""
-        _g_query   = f"{clean} {_team_hint} sofifa".strip() if _team_hint else f"{clean} sofifa"
-        _g_url     = f"https://www.google.com/search?q={_up6.quote_plus(_g_query)}&hl=en"
-        print(f"\n        [google] {_g_query}...", end=" ", flush=True)
-        try:
-            await safe_goto(page, _g_url, timeout=30000)
-            await page.wait_for_timeout(1200)
-            # Extract first sofifa.com/player/ link from Google results
-            _g_player_url = await page.evaluate("""() => {
-                // Method 1: scan all <a> tags
-                const links = document.querySelectorAll('a[href]');
-                for (const a of links) {
-                    const h = a.href || '';
-                    // Google wraps results: google.com/url?q=https://sofifa.com/...
-                    if (h.includes('google.com/url')) {
-                        try {
-                            const q = new URL(h).searchParams.get('q') || '';
-                            if (q.includes('sofifa.com/player/')) return q.split('?')[0];
-                        } catch(e) {}
-                    }
-                    // Direct sofifa link
-                    if (h.includes('sofifa.com/player/')) return h.split('?')[0];
+
+        _SOFIFA_EXTRACT_JS = """() => {
+            const links = document.querySelectorAll('a[href]');
+            for (const a of links) {
+                const h = a.href || '';
+                // Bing/Google may wrap: /url?q=https://sofifa.com/...
+                if (h.includes('/url')) {
+                    try {
+                        const q = new URL(h).searchParams.get('q') || '';
+                        if (q.includes('sofifa.com/player/')) return q.split('?')[0];
+                    } catch(e) {}
                 }
-                // Method 2: scan raw HTML for any sofifa.com/player/ occurrence
-                const m = document.body.innerHTML.match(/https?:\/\/sofifa\\.com\/player\/[a-zA-Z0-9\\/_\\-]+/);
-                if (m) return m[0].split('?')[0];
-                // Method 3: look for sofifa.com/player/ without protocol
-                const m2 = document.body.innerHTML.match(/sofifa\\.com\/player\/[a-zA-Z0-9\\/_\\-]+/);
-                return m2 ? 'https://' + m2[0].split('?')[0] : null;
-            }""")
-            if _g_player_url and 'sofifa.com/player/' in _g_player_url:
+                if (h.includes('sofifa.com/player/')) return h.split('?')[0];
+            }
+            // Fallback: scan raw HTML text
+            const rx = /https?:\\/\\/sofifa[.]com\\/player\\/[a-zA-Z0-9\\/_-]+/g;
+            const hits = (document.body.innerHTML.match(rx) || []);
+            if (hits.length) return hits[0].split('?')[0];
+            const rx2 = /sofifa[.]com\\/player\\/[a-zA-Z0-9\\/_-]+/g;
+            const hits2 = (document.body.innerHTML.match(rx2) || []);
+            return hits2.length ? 'https://' + hits2[0].split('?')[0] : null;
+        }"""
+
+        _team_hint  = team_name.strip() if team_name else ""
+        _base_query = f"{clean} {_team_hint} sofifa".strip() if _team_hint else f"{clean} sofifa"
+
+        _g_player_url = None
+        _search_engines = [
+            ("bing",   f"https://www.bing.com/search?q={_up6.quote_plus(_base_query)}&setlang=en"),
+            ("google", f"https://www.google.com/search?q={_up6.quote_plus(_base_query)}&hl=en&num=5"),
+        ]
+        for _eng, _s_url in _search_engines:
+            print(f"\n        [{_eng}] {_base_query}...", end=" ", flush=True)
+            try:
+                await safe_goto(page, _s_url, timeout=30000)
+                await page.wait_for_timeout(1800)
+                _g_player_url = await page.evaluate(_SOFIFA_EXTRACT_JS)
+                if _g_player_url and 'sofifa.com/player/' in _g_player_url:
+                    print(f"found → {_g_player_url}", end=" ", flush=True)
+                    break
+                else:
+                    print(f"[no result]", end=" ", flush=True)
+            except Exception as _es:
+                print(f"[{_eng} exc: {_es}]", end=" ", flush=True)
+
+        if _g_player_url and 'sofifa.com/player/' in _g_player_url:
                 await safe_goto(page, _g_player_url, timeout=35000)
                 await page.wait_for_timeout(600)
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -1397,7 +1412,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                     for (const img of document.querySelectorAll('img')) {
                         const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
                         for (const src of candidates) {
-                            const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
+                            const m = src.match(/\/players\/(\d+)\/(\d+)\//);
                             if (m && parseInt(m[1]) > 0) {
                                 photoUrl = src.replace('_120.png','_240.png').replace('_60.png','_240.png');
                                 break;
@@ -1407,9 +1422,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                     }
                     let kit = '';
                     const body = document.body.innerText;
-                    const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
-                    const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
-                    const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
+                    const mClub = body.match(/Kit[\s·]*Number[\s\S]{0,40}?Club[^0-9]{0,15}?(\d{1,3})/i);
+                    const mNat  = body.match(/Kit[\s·]*Number[\s\S]{0,40}?National[^0-9]{0,15}?(\d{1,3})/i);
+                    const mAny  = body.match(/Kit[\s·]*Number[^0-9\n]{0,30}?(\d{1,3})/i);
                     if (matchType === 'national') {
                         if (mNat) kit = mNat[1];
                         else if (mClub) kit = mClub[1];
@@ -1428,11 +1443,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                         _pg_g['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
                     )
                     if _r7.status_code == 200 and len(_r7.content) > 300:
-                        return _r7.content, kit, "google_search", _g_player_url
-            else:
-                print(f"[no sofifa link in google results]", end=" ", flush=True)
-        except Exception as _e6:
-            print(f"[google exc: {_e6}]", end=" ", flush=True)
+                        return _r7.content, kit, "search_fallback", _g_player_url
+        else:
+            print(f"[no sofifa link in any search engine]", end=" ", flush=True)
 
     # Pastreaza kit-ul gasit (din roster / pagina jucatorului) chiar daca poza a esuat
     return None, kit, None, (best.get('playerUrl', '') if best else '')

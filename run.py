@@ -1179,14 +1179,7 @@ async def fetch_from_roster(name: str, roster: list, page,
         # Try all keyword variants (e.g. "Ruiz F" → "Ruiz F", "Ruiz")
         all_kws = _search_keywords(clean)
         pg2 = None
-        for _kw_attempt in all_kws:
-            kw = _kw_attempt.replace(" ", "+")
-            # Filter by team ID when known (prevents wrong-player matches)
-            team_filter = f"&teamId={team_id}" if (team_id > 0 and match_type != "national") else ""
-            search_url = f"https://sofifa.com/players?keyword={kw}{team_filter}&hl=en-US"
-            await safe_goto(page, search_url, timeout=35000)
-            await page.wait_for_timeout(300)
-            pg2 = await page.evaluate("""(searchName) => {
+        _DS_JS = """(searchName) => {
             const rows = document.querySelectorAll('table tbody tr');
             let best = null, bestScore = -1;
             const norm = s => s.toLowerCase().normalize('NFD')
@@ -1196,7 +1189,6 @@ async def fetch_from_roster(name: str, roster: list, page,
                 const link = row.querySelector('td a[href*="/player/"]');
                 if (!link) return;
                 const nm   = norm(link.innerText);
-                // Verifica si URL-ul (slug-ul contine numele complet, ex. kepa-arrizabalaga-revuelta)
                 const slug = norm(link.href.replace(/-/g,' '));
                 const scNm  = toks.reduce((s,t) => s + (nm.includes(t)   ? 1 : 0), 0) / toks.length;
                 const scUrl = toks.reduce((s,t) => s + (slug.includes(t) ? 1 : 0), 0) / toks.length;
@@ -1205,7 +1197,21 @@ async def fetch_from_roster(name: str, roster: list, page,
             });
             if (!best || bestScore < 0.5) return null;
             return best;
-        }""", clean)
+        }"""
+        # Pass 1: with teamId filter (precise); Pass 2: without filter (catches loans/mismatches)
+        _team_filter_opts = []
+        if team_id > 0 and match_type != "national":
+            _team_filter_opts.append(f"&teamId={team_id}")
+        _team_filter_opts.append("")   # always try without filter as fallback
+        for _kw_attempt in all_kws:
+            kw = _kw_attempt.replace(" ", "+")
+            for _tf in _team_filter_opts:
+                search_url = f"https://sofifa.com/players?keyword={kw}{_tf}&hl=en-US"
+                await safe_goto(page, search_url, timeout=35000)
+                await page.wait_for_timeout(300)
+                pg2 = await page.evaluate(_DS_JS, clean)
+                if pg2:
+                    break
             if pg2:
                 break  # found a match — stop trying other keywords
         if pg2 and pg2.get('url'):

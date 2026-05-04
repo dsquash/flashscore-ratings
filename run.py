@@ -1353,62 +1353,89 @@ async def fetch_from_roster(name: str, roster: list, page,
         except Exception as e5:
             print(f"[fs_fullname exc: {e5}]", end=" ", flush=True)
 
-    # ── 6. Fallback: search "{name} {team} sofifa" via Bing then Google ──
+    # ── 6. Fallback: search "{name} {team} sofifa" ──────────────────
+    # Strategy A: httpx direct (no browser, no bot detection)
+    # Strategy B: Playwright browser (Google with consent cookie, then Bing)
     if not photo_raw:
         import urllib.parse as _up6
-
-        _SOFIFA_EXTRACT_JS = """() => {
-            const links = document.querySelectorAll('a[href]');
-            for (const a of links) {
-                const h = a.href || '';
-                // Bing/Google may wrap: /url?q=https://sofifa.com/...
-                if (h.includes('/url')) {
-                    try {
-                        const q = new URL(h).searchParams.get('q') || '';
-                        if (q.includes('sofifa.com/player/')) return q.split('?')[0];
-                    } catch(e) {}
-                }
-                if (h.includes('sofifa.com/player/')) return h.split('?')[0];
-            }
-            // Fallback: scan raw HTML text
-            const rx = /https?:\\/\\/sofifa[.]com\\/player\\/[a-zA-Z0-9\\/_-]+/g;
-            const hits = (document.body.innerHTML.match(rx) || []);
-            if (hits.length) return hits[0].split('?')[0];
-            const rx2 = /sofifa[.]com\\/player\\/[a-zA-Z0-9\\/_-]+/g;
-            const hits2 = (document.body.innerHTML.match(rx2) || []);
-            return hits2.length ? 'https://' + hits2[0].split('?')[0] : null;
-        }"""
+        import re as _re6
 
         _team_hint  = team_name.strip() if team_name else ""
         _base_query = f"{clean} {_team_hint} sofifa".strip() if _team_hint else f"{clean} sofifa"
-
-        # Pre-set Google consent cookie so we skip the GDPR consent page
-        try:
-            await page.context.add_cookies([
-                {"name": "SOCS",    "value": "CAISHAgBEhIaAB", "domain": ".google.com", "path": "/"},
-                {"name": "CONSENT", "value": "YES+cb",          "domain": ".google.com", "path": "/"},
-            ])
-        except Exception:
-            pass
-
         _g_player_url = None
-        _search_engines = [
-            ("google", f"https://www.google.com/search?q={_up6.quote_plus(_base_query)}&hl=en&gl=us&num=5"),
-            ("bing",   f"https://www.bing.com/search?q={_up6.quote_plus(_base_query)}&setlang=en"),
+
+        # ── Strategy A: httpx Bing search (fast, no headless detection) ──
+        _HTTPX_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                     "AppleWebKit/537.36 (KHTML, like Gecko) "
+                     "Chrome/124.0.0.0 Safari/537.36")
+        _httpx_engines = [
+            ("bing/httpx",   f"https://www.bing.com/search?q={_up6.quote_plus(_base_query)}&setlang=en&cc=US"),
+            ("google/httpx", f"https://www.google.com/search?q={_up6.quote_plus(_base_query)}&hl=en&gl=us&num=5"),
         ]
-        for _eng, _s_url in _search_engines:
+        for _eng, _s_url in _httpx_engines:
             print(f"\n        [{_eng}] {_base_query}...", end=" ", flush=True)
             try:
-                await safe_goto(page, _s_url, timeout=30000)
-                await page.wait_for_timeout(1800)
-                _g_player_url = await page.evaluate(_SOFIFA_EXTRACT_JS)
-                if _g_player_url and 'sofifa.com/player/' in _g_player_url:
+                _sr = await client.get(_s_url, timeout=12, follow_redirects=True,
+                                       headers={"User-Agent": _HTTPX_UA,
+                                                "Accept-Language": "en-US,en;q=0.9",
+                                                "Accept": "text/html,application/xhtml+xml"})
+                _hits = _re6.findall(
+                    r'https?://sofifa\.com/player/[a-zA-Z0-9/_-]+', _sr.text)
+                if _hits:
+                    _g_player_url = _hits[0].split('?')[0]
                     print(f"found → {_g_player_url}", end=" ", flush=True)
                     break
                 else:
                     print(f"[no result]", end=" ", flush=True)
             except Exception as _es:
-                print(f"[{_eng} exc: {_es}]", end=" ", flush=True)
+                print(f"[exc: {_es}]", end=" ", flush=True)
+
+        # ── Strategy B: Playwright browser (if httpx found nothing) ──
+        if not _g_player_url:
+            _SOFIFA_EXTRACT_JS = """() => {
+                const links = document.querySelectorAll('a[href]');
+                for (const a of links) {
+                    const h = a.href || '';
+                    if (h.includes('/url')) {
+                        try {
+                            const q = new URL(h).searchParams.get('q') || '';
+                            if (q.includes('sofifa.com/player/')) return q.split('?')[0];
+                        } catch(e) {}
+                    }
+                    if (h.includes('sofifa.com/player/')) return h.split('?')[0];
+                }
+                const rx = /https?:\\/\\/sofifa[.]com\\/player\\/[a-zA-Z0-9\\/_-]+/g;
+                const hits = (document.body.innerHTML.match(rx) || []);
+                if (hits.length) return hits[0].split('?')[0];
+                const rx2 = /sofifa[.]com\\/player\\/[a-zA-Z0-9\\/_-]+/g;
+                const hits2 = (document.body.innerHTML.match(rx2) || []);
+                return hits2.length ? 'https://' + hits2[0].split('?')[0] : null;
+            }"""
+            try:
+                await page.context.add_cookies([
+                    {"name": "SOCS",    "value": "CAISHAgBEhIaAB", "domain": ".google.com", "path": "/"},
+                    {"name": "CONSENT", "value": "YES+cb",          "domain": ".google.com", "path": "/"},
+                ])
+            except Exception:
+                pass
+            _pw_engines = [
+                ("google/pw", f"https://www.google.com/search?q={_up6.quote_plus(_base_query)}&hl=en&gl=us&num=5"),
+                ("bing/pw",   f"https://www.bing.com/search?q={_up6.quote_plus(_base_query)}&setlang=en"),
+            ]
+            for _eng, _s_url in _pw_engines:
+                print(f"\n        [{_eng}] {_base_query}...", end=" ", flush=True)
+                try:
+                    await safe_goto(page, _s_url, timeout=30000)
+                    await page.wait_for_timeout(2000)
+                    _ptitle = await page.title()
+                    _g_player_url = await page.evaluate(_SOFIFA_EXTRACT_JS)
+                    if _g_player_url and 'sofifa.com/player/' in _g_player_url:
+                        print(f"found → {_g_player_url}", end=" ", flush=True)
+                        break
+                    else:
+                        print(f"[no result, page: {_ptitle[:40]}]", end=" ", flush=True)
+                except Exception as _es:
+                    print(f"[exc: {_es}]", end=" ", flush=True)
 
         if _g_player_url and 'sofifa.com/player/' in _g_player_url:
                 await safe_goto(page, _g_player_url, timeout=35000)

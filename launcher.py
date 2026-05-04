@@ -157,7 +157,8 @@ class App(_BASE_CLS):
             **self._btn_kw("secondary-outline" if _BOOT else ""))
         self.btn_check_update.pack(side="right", padx=(8, 0))
 
-        ttk.Separator(root).pack(fill="x", padx=PAD, pady=(PAD_S, 0))
+        self._hdr_sep = ttk.Separator(root)
+        self._hdr_sep.pack(fill="x", padx=PAD, pady=(PAD_S, 0))
 
         # ── URL card ──────────────────────────────────────────────
         url_frame = ttk.Frame(root, padding=(PAD, PAD_S, PAD, 0))
@@ -614,7 +615,7 @@ class App(_BASE_CLS):
                    **self._btn_kw("success")).pack(side="left", padx=(12, 0))
         ttk.Button(banner, text="✕", command=banner.destroy,
                    **self._btn_kw("light")).pack(side="right")
-        banner.pack(fill="x")
+        banner.pack(fill="x", after=self._hdr_sep)
 
     def _check_update_manual(self):
         try: self.btn_check_update.configure(text="Checking...")
@@ -642,10 +643,9 @@ class App(_BASE_CLS):
             return
         if available:
             self._show_update_banner(local, remote)
+            self.status_var.set(f"⬆ Update available: v{local} → v{remote}")
         else:
-            self.status_var.set(f"✓ You're up to date (v{local})")
-        else:
-            msg = "Could not reach GitHub." if remote == "?" else f"Already up to date (v{local})."
+            msg = "Could not reach GitHub." if remote == "?" else f"✓ Already up to date (v{local})."
             self.status_var.set(msg)
 
     def _do_update(self, remote: str):

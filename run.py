@@ -1488,23 +1488,42 @@ async def fetch_from_roster(name: str, roster: list, page,
         # ── Strategy B: Playwright browser (if httpx found nothing) ──
         if not _g_player_url:
             _SOFIFA_EXTRACT_JS = """() => {
-                const links = document.querySelectorAll('a[href]');
-                for (const a of links) {
-                    const h = a.href || '';
+                function tryDecode(h) {
+                    // Google: /url?q=https://sofifa.com/...
                     if (h.includes('/url')) {
                         try {
                             const q = new URL(h).searchParams.get('q') || '';
                             if (q.includes('sofifa.com/player/')) return q.split('?')[0];
                         } catch(e) {}
                     }
+                    // Bing: /ck/a?!&&...&u=a1BASE64...
+                    if (h.includes('/ck/a') || h.includes('bing.com')) {
+                        try {
+                            const u = new URL(h).searchParams.get('u') || '';
+                            if (u) {
+                                const decoded = atob(u.replace(/^a1/, '').replace(/-/g,'+').replace(/_/g,'/'));
+                                if (decoded.includes('sofifa.com/player/')) return decoded.split('?')[0];
+                            }
+                        } catch(e) {}
+                    }
+                    // Direct link
                     if (h.includes('sofifa.com/player/')) return h.split('?')[0];
+                    return null;
                 }
+                const links = document.querySelectorAll('a[href]');
+                for (const a of links) {
+                    const result = tryDecode(a.href || '');
+                    if (result) return result;
+                }
+                // Scan raw HTML for sofifa player URLs
                 const rx = /https?:\\/\\/sofifa[.]com\\/player\\/[a-zA-Z0-9\\/_-]+/g;
                 const hits = (document.body.innerHTML.match(rx) || []);
                 if (hits.length) return hits[0].split('?')[0];
-                const rx2 = /sofifa[.]com\\/player\\/[a-zA-Z0-9\\/_-]+/g;
-                const hits2 = (document.body.innerHTML.match(rx2) || []);
-                return hits2.length ? 'https://' + hits2[0].split('?')[0] : null;
+                // Also scan for encoded sofifa URLs in bing tracking links
+                const rxEnc = /sofifa\.com%2Fplayer%2F[a-zA-Z0-9%_-]+/g;
+                const hitsEnc = (document.body.innerHTML.match(rxEnc) || []);
+                if (hitsEnc.length) return 'https://' + decodeURIComponent(hitsEnc[0].split('%3F')[0]);
+                return null;
             }"""
             try:
                 await page.context.add_cookies([

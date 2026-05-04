@@ -1185,13 +1185,18 @@ async def fetch_from_roster(name: str, roster: list, page,
 
         print(f"\n        [api] team/{team_id} → {clean}...", end=" ", flush=True)
         try:
-            await safe_goto(page, f"https://api.sofifa.net/team/{team_id}", timeout=30000)
-            await page.wait_for_timeout(1500)
-            _api_json = await page.evaluate("""() => {
-                try { return JSON.parse(document.body.innerText); }
-                catch(e) { return null; }
-            }""")
-            if _api_json and isinstance(_api_json, dict):
+            # Fetch via browser JS (stays on sofifa.com — bypasses Cloudflare)
+            _api_json = await page.evaluate("""async (teamId) => {
+                try {
+                    const r = await fetch('https://api.sofifa.net/team/' + teamId, {
+                        headers: { 'Accept': 'application/json' },
+                        credentials: 'omit'
+                    });
+                    if (!r.ok) return { _err: r.status };
+                    return await r.json();
+                } catch(e) { return { _err: String(e) }; }
+            }""", team_id)
+            if _api_json and isinstance(_api_json, dict) and not _api_json.get("_err"):
                 _api_players = (_api_json.get("data") or {}).get("players") or []
                 best_api = None; best_api_sc = -1
                 for _ap in _api_players:
@@ -1247,7 +1252,8 @@ async def fetch_from_roster(name: str, roster: list, page,
                 else:
                     print(f"[not in roster sc={best_api_sc:.2f}]", end=" ", flush=True)
             else:
-                print(f"[api no json]", end=" ", flush=True)
+                _err_val = (_api_json or {}).get("_err", "no json") if isinstance(_api_json, dict) else "null"
+                print(f"[api err: {_err_val}]", end=" ", flush=True)
         except Exception as _e35:
             print(f"[api exc: {_e35}]", end=" ", flush=True)
 

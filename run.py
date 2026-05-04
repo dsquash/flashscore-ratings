@@ -1353,45 +1353,38 @@ async def fetch_from_roster(name: str, roster: list, page,
         except Exception as e5:
             print(f"[fs_fullname exc: {e5}]", end=" ", flush=True)
 
-    # ── 6. Fallback: DuckDuckGo search "{name} {team} sofifa" ────────────
+    # ── 6. Fallback: Google search "{name} {team} sofifa" via playwright ──
     if not photo_raw:
-        import re as _re6, urllib.parse as _up6
-        # Build search query: "Mauricio Palmeiras sofifa"
+        import urllib.parse as _up6
         _team_hint = team_name.strip() if team_name else ""
-        _ddg_query = f"{clean} {_team_hint} sofifa".strip() if _team_hint else f"{clean} sofifa"
-        _ddg_encoded = _up6.quote_plus(_ddg_query)
-        _ddg_url = f"https://html.duckduckgo.com/html/?q={_ddg_encoded}"
-        print(f"\n        [ddg search] {_ddg_query}...", end=" ", flush=True)
+        _g_query   = f"{clean} {_team_hint} sofifa".strip() if _team_hint else f"{clean} sofifa"
+        _g_url     = f"https://www.google.com/search?q={_up6.quote_plus(_g_query)}&hl=en"
+        print(f"\n        [google] {_g_query}...", end=" ", flush=True)
         try:
-            _r_ddg = await client.get(
-                _ddg_url,
-                headers={**hdrs, "Accept": "text/html"},
-                timeout=15,
-                follow_redirects=True
-            )
-            # Extract first sofifa.com/player/ URL from results
-            _sofifa_match = _re6.search(
-                r'https?://sofifa\.com/player/[a-zA-Z0-9/_\-]+',
-                _r_ddg.text
-            )
-            if not _sofifa_match:
-                # DDG sometimes encodes URLs — try uddg= param
-                _uddg = _re6.search(r'uddg=([^&"]+)', _r_ddg.text)
-                if _uddg:
-                    _decoded = _up6.unquote(_uddg.group(1))
-                    if 'sofifa.com/player/' in _decoded:
-                        _sofifa_match = _re6.search(
-                            r'https?://sofifa\.com/player/[a-zA-Z0-9/_\-]+',
-                            _decoded
-                        )
-            if _sofifa_match:
-                _ddg_player_url = _sofifa_match.group(0).rstrip('/')
-                await safe_goto(page, _ddg_player_url, timeout=35000)
+            await safe_goto(page, _g_url, timeout=30000)
+            await page.wait_for_timeout(1200)
+            # Extract first sofifa.com/player/ link from Google results
+            _g_player_url = await page.evaluate("""() => {
+                const links = document.querySelectorAll('a[href]');
+                for (const a of links) {
+                    const h = a.href || '';
+                    if (h.includes('sofifa.com/player/')) {
+                        // Strip Google redirect wrapper if present
+                        const clean = h.split('?')[0].split('&')[0];
+                        return clean;
+                    }
+                }
+                // Fallback: scan all text on page for sofifa.com/player/ URLs
+                const m = document.body.innerHTML.match(/sofifa\\.com\\/player\\/[a-zA-Z0-9/_\\-]+/);
+                return m ? 'https://' + m[0] : null;
+            }""")
+            if _g_player_url and 'sofifa.com/player/' in _g_player_url:
+                await safe_goto(page, _g_player_url, timeout=35000)
                 await page.wait_for_timeout(600)
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 await page.wait_for_timeout(400)
                 await page.evaluate("window.scrollTo(0, 0)")
-                _pg_ddg = await page.evaluate("""(matchType) => {
+                _pg_g = await page.evaluate("""(matchType) => {
                     let photoUrl = '';
                     for (const img of document.querySelectorAll('img')) {
                         const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
@@ -1420,18 +1413,18 @@ async def fetch_from_roster(name: str, roster: list, page,
                     }
                     return { photoUrl, kit };
                 }""", match_type) or {}
-                if _pg_ddg.get('kit'):
-                    kit = _pg_ddg['kit']
-                if _pg_ddg.get('photoUrl'):
+                if _pg_g.get('kit'):
+                    kit = _pg_g['kit']
+                if _pg_g.get('photoUrl'):
                     _r7 = await client.get(
-                        _pg_ddg['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
+                        _pg_g['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
                     )
                     if _r7.status_code == 200 and len(_r7.content) > 300:
-                        return _r7.content, kit, "ddg_search", _ddg_player_url
+                        return _r7.content, kit, "google_search", _g_player_url
             else:
-                print(f"[no sofifa link in ddg results]", end=" ", flush=True)
+                print(f"[no sofifa link in google results]", end=" ", flush=True)
         except Exception as _e6:
-            print(f"[ddg exc: {_e6}]", end=" ", flush=True)
+            print(f"[google exc: {_e6}]", end=" ", flush=True)
 
     # Pastreaza kit-ul gasit (din roster / pagina jucatorului) chiar daca poza a esuat
     return None, kit, None, (best.get('playerUrl', '') if best else '')

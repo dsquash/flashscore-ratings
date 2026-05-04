@@ -67,10 +67,6 @@ SOFIFA_HEADERS   = {
     "Origin": "https://sofifa.com",
 }
 
-# ── API-Football ───────────────────────────────────────────────
-API_FOOTBALL_KEY        = "3483b037385b9a88721f75d7f00ed5bc"
-API_FOOTBALL_BASE       = "https://v3.football.api-sports.io"
-API_FOOTBALL_PHOTO_BASE = "https://media.api-sports.io/football/players"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -648,96 +644,6 @@ def _search_keywords(name: str) -> list:
     return kws
 
 
-def fetch_apifootball_players(home_team: str, away_team: str) -> dict:
-    """
-    Cauta meciul in API-Football (azi ± 1 zi) dupa team names.
-    Returneaza: { normalized_name → { player_id, kit, photo_url, name } }
-    Foloseste doar fixtures/lineups (2 HTTP calls total).
-    """
-    from datetime import date, timedelta
-
-    af_headers = {"x-apisports-key": API_FOOTBALL_KEY}
-
-    def _team_score(api_name: str, fs_name: str) -> float:
-        """Cat de bine se potriveste numele din API cu cel din FlashScore."""
-        a = _norm(api_name)
-        f = _norm(fs_name)
-        toks = [t for t in f.split() if len(t) >= 3]
-        if not toks:
-            return 0.0
-        # potrivire directa: fiecare token din FS trebuie sa apara in stringul din API
-        return sum(1 for t in toks if t in a) / len(toks)
-
-    # Incearca azi, ieri, maine (meci live/recent)
-    fixture_id = None
-    best_overall = 0.0
-    for delta in [0, -1, 1]:
-        d = (date.today() + timedelta(days=delta)).isoformat()
-        try:
-            r = httpx.get(
-                f"{API_FOOTBALL_BASE}/fixtures",
-                params={"date": d},
-                headers=af_headers,
-                timeout=12,
-                follow_redirects=True,
-            )
-            if r.status_code != 200:
-                continue
-            fixtures = r.json().get("response", [])
-            for fx in fixtures:
-                h = fx["teams"]["home"]["name"]
-                a = fx["teams"]["away"]["name"]
-                # Incearca ambele ordini (home/away pot fi inversate)
-                s1 = min(_team_score(h, home_team), _team_score(a, away_team))
-                s2 = min(_team_score(a, home_team), _team_score(h, away_team))
-                s = max(s1, s2)
-                if s > best_overall:
-                    best_overall = s
-                    fixture_id = fx["fixture"]["id"]
-            if fixture_id and best_overall >= 0.5:
-                break
-        except Exception:
-            continue
-
-    if not fixture_id or best_overall < 0.5:
-        return {}
-
-    print(f"    [api-football] fixture {fixture_id} (match score {best_overall:.2f})", end=" ", flush=True)
-
-    # Extrage lineup: toti jucatorii cu ID, kit, nume
-    result = {}
-    try:
-        r = httpx.get(
-            f"{API_FOOTBALL_BASE}/fixtures/lineups",
-            params={"fixture": fixture_id},
-            headers=af_headers,
-            timeout=12,
-            follow_redirects=True,
-        )
-        if r.status_code == 200:
-            for team_data in r.json().get("response", []):
-                for group in ("startXI", "substitutes"):
-                    for entry in team_data.get(group, []):
-                        pl = entry["player"]
-                        pid  = pl.get("id")
-                        name = pl.get("name", "")
-                        kit  = str(pl.get("number") or "")
-                        if pid and name:
-                            result[_norm(name)] = {
-                                "player_id": pid,
-                                "kit": kit,
-                                "photo_url": f"{API_FOOTBALL_PHOTO_BASE}/{pid}.png",
-                                "name": name,
-                            }
-            print(f"→ {len(result)} jucatori")
-        else:
-            print(f"→ lineups err {r.status_code}")
-    except Exception as e:
-        print(f"→ lineups exc: {e}")
-
-    return result
-
-
 async def safe_goto(page, url: str, wait_until: str = "domcontentloaded",
                     timeout: int = 30000, retries: int = 2):
     """page.goto cu retry automat la timeout."""
@@ -1267,197 +1173,91 @@ async def fetch_from_roster(name: str, roster: list, page,
         if photo_raw is not None:
             return photo_raw, kit, photo_src, best.get('playerUrl', '')
 
-    # ── 3.5. SoFIFA API via Playwright (browser trece de Cloudflare) ─
-    if not photo_raw and team_id > 0:
-        import unicodedata as _ud35
-        def _norm35(s):
-            return _ud35.normalize('NFD', s.lower()).encode('ascii', 'ignore').decode().strip()
+    # ── 4. DuckDuckGo search → SoFIFA player URL ─────────────────
+    # Gaseste si jucatori "customized" pe care sofifa.com/players nu ii indexeaza
+    if not photo_raw:
+        import urllib.request as _urlreq
+        import urllib.parse  as _urlparse
+        import re            as _re4
 
-        _clean_norm35 = _norm35(clean)
-        _toks35 = [t for t in _clean_norm35.split() if len(t) >= 3]
-        if not _toks35:
-            _toks35 = [_clean_norm35]
+        _team_hint4 = team_name.strip() if team_name else ""
+        _ddg_query  = f"{clean} {_team_hint4} sofifa".strip() if _team_hint4 else f"{clean} sofifa"
+        print(f"\n        [ddg] {_ddg_query}...", end=" ", flush=True)
 
-        print(f"\n        [api] team/{team_id} → {clean}...", end=" ", flush=True)
-        try:
-            # Fetch via browser JS (stays on sofifa.com — bypasses Cloudflare)
-            _api_json = await page.evaluate("""async (teamId) => {
-                try {
-                    const r = await fetch('https://api.sofifa.net/team/' + teamId, {
-                        headers: { 'Accept': 'application/json' },
-                        credentials: 'omit'
-                    });
-                    if (!r.ok) return { _err: r.status };
-                    return await r.json();
-                } catch(e) { return { _err: String(e) }; }
-            }""", team_id)
-            if _api_json and isinstance(_api_json, dict) and not _api_json.get("_err"):
-                _api_players = (_api_json.get("data") or {}).get("players") or []
-                best_api = None; best_api_sc = -1
-                for _ap in _api_players:
-                    _cn   = _norm35(_ap.get("commonName") or "")
-                    _full = _norm35(f"{_ap.get('firstName','')} {_ap.get('lastName','')}".strip())
-                    for _cand in [_cn, _full]:
-                        if not _cand: continue
-                        sc = sum(1 for t in _toks35 if t in _cand) / len(_toks35)
-                        if sc > best_api_sc:
-                            best_api_sc = sc; best_api = _ap
-                if best_api and best_api_sc >= 0.5:
-                    _pid = best_api["id"]
-                    _api_player_url = f"https://sofifa.com/player/{_pid}/"
-                    print(f"found id={_pid} ({best_api.get('commonName','')}) sc={best_api_sc:.2f}", end=" ", flush=True)
-                    await safe_goto(page, _api_player_url, timeout=35000)
-                    await page.wait_for_timeout(600)
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await page.wait_for_timeout(400)
-                    await page.evaluate("window.scrollTo(0, 0)")
-                    _pg_api = await page.evaluate("""(matchType) => {
-                        let photoUrl = '';
-                        for (const img of document.querySelectorAll('img')) {
-                            const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
-                            for (const src of candidates) {
-                                const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
-                                if (m && parseInt(m[1]) > 0) {
-                                    photoUrl = src.replace('_120.png','_240.png').replace('_60.png','_240.png');
-                                    break;
-                                }
-                            }
-                            if (photoUrl) break;
-                        }
-                        let kit = '';
-                        const body = document.body.innerText;
-                        const mClub = body.match(/Kit[\\s·]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
-                        const mNat  = body.match(/Kit[\\s·]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
-                        const mAny  = body.match(/Kit[\\s·]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
-                        if (matchType === 'national') {
-                            kit = (mNat||mClub||mAny||[])[1] || '';
-                        } else {
-                            kit = (mClub || (mAny && !mNat && mAny) || mNat || [])[1] || '';
-                        }
-                        const canonical = document.querySelector('link[rel="canonical"]');
-                        return { photoUrl, kit, playerUrl: canonical ? canonical.href : window.location.href };
-                    }""", match_type) or {}
-                    if _pg_api.get("kit"): kit = _pg_api["kit"]
-                    if _pg_api.get("photoUrl"):
-                        _r_api = await client.get(
-                            _pg_api["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
-                        )
-                        if _r_api.status_code == 200 and len(_r_api.content) > 300:
-                            return _r_api.content, kit, "api_team", _pg_api.get("playerUrl", _api_player_url)
-                else:
-                    print(f"[not in roster sc={best_api_sc:.2f}]", end=" ", flush=True)
-            else:
-                _err_val = (_api_json or {}).get("_err", "no json") if isinstance(_api_json, dict) else "null"
-                print(f"[api err: {_err_val}]", end=" ", flush=True)
-        except Exception as _e35:
-            print(f"[api exc: {_e35}]", end=" ", flush=True)
-
-    # ── 4. Fallback final: cautare directa SoFIFA dupa nume ──────
-    # (folosit cand jucatorul nu e in roster: ex. imprumut, jucator nou)
-    print(f"\n        [direct search] {clean}...", end=" ", flush=True)
-    try:
-        # Try all keyword variants (e.g. "Ruiz F" → "Ruiz F", "Ruiz")
-        all_kws = _search_keywords(clean)
-        pg2 = None
-        _DS_JS = """(searchName) => {
-            const rows = document.querySelectorAll('table tbody tr');
-            if (rows.length === 0) return { _debug: 'no_rows', _url: window.location.href };
-            let best = null, bestScore = -1;
-            const norm = s => s.toLowerCase().normalize('NFD')
-                .replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9 ]/g,'');
-            const toks = norm(searchName).split(' ').filter(t => t.length >= 3);
-            rows.forEach(row => {
-                const link = row.querySelector('td a[href*="/player/"]');
-                if (!link) return;
-                const nm   = norm(link.innerText);
-                const slug = norm(link.href.replace(/-/g,' '));
-                const scNm  = toks.reduce((s,t) => s + (nm.includes(t)   ? 1 : 0), 0) / toks.length;
-                const scUrl = toks.reduce((s,t) => s + (slug.includes(t) ? 1 : 0), 0) / toks.length;
-                const sc = Math.max(scNm, scUrl);
-                if (sc > bestScore) { bestScore = sc; best = { url: link.href, score: sc }; }
-            });
-            if (!best || bestScore < 0.5) return null;
-            return best;
-        }"""
-        # Pass 1: with teamId filter (precise); Pass 2: without filter (catches loans/mismatches)
-        _team_filter_opts = []
-        if team_id > 0 and match_type != "national":
-            _team_filter_opts.append(f"&teamId={team_id}")
-        _team_filter_opts.append("")   # always try without filter as fallback
-        for _kw_attempt in all_kws:
-            kw = _kw_attempt.replace(" ", "+")
-            for _tf in _team_filter_opts:
-                search_url = f"https://sofifa.com/players?keyword={kw}{_tf}&hl=en-US"
-                await safe_goto(page, search_url, timeout=35000)
-                await page.wait_for_timeout(1500)
-                pg2 = await page.evaluate(_DS_JS, clean)
-                if isinstance(pg2, dict) and pg2.get('_debug') == 'no_rows':
-                    print(f"[0 rows, url={pg2.get('_url','?')[:60]}]", end=" ", flush=True)
-                    pg2 = None
-                if pg2:
-                    break
-            if pg2:
-                break  # found a match — stop trying other keywords
-        if pg2 and pg2.get('url'):
-            direct_url = pg2['url']
-            await safe_goto(page, direct_url, timeout=35000)
-            await page.wait_for_timeout(600)
-            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            await page.wait_for_timeout(500)
-            await page.evaluate("window.scrollTo(0, 0)")
-            pg3 = await page.evaluate("""(matchType) => {
-                let photoUrl = '';
-                for (const img of document.querySelectorAll('img')) {
-                    const candidates = [
-                        img.src || '',
-                        img.getAttribute('data-src') || '',
-                        img.getAttribute('src') || ''
-                    ];
-                    for (const src of candidates) {
-                        const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
-                        if (m && parseInt(m[1]) > 0) {
-                            photoUrl = src.replace('_120.png','_240.png')
-                                          .replace('_60.png','_240.png');
-                            break;
-                        }
+        _PHOTO_JS = """(matchType) => {
+            let photoUrl = '';
+            for (const img of document.querySelectorAll('img')) {
+                const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
+                for (const src of candidates) {
+                    const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
+                    if (m && parseInt(m[1]) > 0) {
+                        photoUrl = src.replace('_120.png','_240.png').replace('_60.png','_240.png');
+                        break;
                     }
-                    if (photoUrl) break;
                 }
-                let kit = '';
-                const body = document.body.innerText;
-                const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
-                const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
-                const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
-                if (matchType === 'national') {
-                    if (mNat) kit = mNat[1];
-                    else if (mClub) kit = mClub[1];
-                    else if (mAny) kit = mAny[1];
-                } else {
-                    if (mClub) kit = mClub[1];
-                    else if (mAny && !mNat) kit = mAny[1];
-                    else if (mNat) kit = mNat[1];
-                }
-                // Extract SoFIFA team ID from the club link (for team verification)
-                let clubTeamId = 0;
-                const clubLink = document.querySelector('a[href*="/team/"]');
-                if (clubLink) {
-                    const parts = clubLink.href.split('/team/');
-                    if (parts.length > 1) clubTeamId = parseInt(parts[1]) || 0;
-                }
-                return { photoUrl, kit, clubTeamId };
-            }""", match_type) or {}
-            # teamId filter in the search URL already guards against wrong players.
-            # Additional club ID check on the player page is skipped because SoFIFA uses
-            # different team IDs for the same club across FIFA versions (e.g. FC24 vs FC25).
-            if pg3.get('kit'): kit = pg3['kit']
-            if pg3.get('photoUrl'):
-                r = await client.get(
-                    pg3['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
-                )
-                if r.status_code == 200 and len(r.content) > 300:
-                    return r.content, kit, "direct_search", direct_url
-    except Exception as e:
-        print(f"[search exc: {e}]", end=" ", flush=True)
+                if (photoUrl) break;
+            }
+            let kit = '';
+            const body = document.body.innerText;
+            const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
+            const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
+            const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
+            if (matchType === 'national') {
+                if (mNat) kit = mNat[1];
+                else if (mClub) kit = mClub[1];
+                else if (mAny) kit = mAny[1];
+            } else {
+                if (mClub) kit = mClub[1];
+                else if (mAny && !mNat) kit = mAny[1];
+                else if (mNat) kit = mNat[1];
+            }
+            const canonical = document.querySelector('link[rel="canonical"]');
+            return { photoUrl, kit, playerUrl: canonical ? canonical.href : window.location.href };
+        }"""
+
+        _ddg_player_url = None
+        try:
+            _ddg_ua  = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            _ddg_url = ("https://html.duckduckgo.com/html/?q="
+                        + _urlparse.quote_plus(_ddg_query))
+            _ddg_req = _urlreq.Request(
+                _ddg_url,
+                headers={"User-Agent": _ddg_ua, "Accept-Language": "en-US,en;q=0.9"}
+            )
+            with _urlreq.urlopen(_ddg_req, timeout=12) as _ddg_r:
+                _ddg_html = _ddg_r.read().decode("utf-8", errors="ignore")
+            # DDG wraps external links in uddg=URL_ENCODED_TARGET
+            _uddg_hits = _re4.findall(r'uddg=([^&"#\s]+)', _ddg_html)
+            for _enc in _uddg_hits:
+                _dec = _urlparse.unquote(_enc)
+                if "sofifa.com/player/" in _dec:
+                    _ddg_player_url = _dec.split("?")[0]
+                    break
+        except Exception as _e4:
+            print(f"[ddg exc: {_e4}]", end=" ", flush=True)
+
+        if _ddg_player_url:
+            print(f"found → {_ddg_player_url}", end=" ", flush=True)
+            try:
+                await safe_goto(page, _ddg_player_url, timeout=35000)
+                await page.wait_for_timeout(600)
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_timeout(400)
+                await page.evaluate("window.scrollTo(0, 0)")
+                _pg4 = await page.evaluate(_PHOTO_JS, match_type) or {}
+                if _pg4.get("kit"):
+                    kit = _pg4["kit"]
+                if _pg4.get("photoUrl"):
+                    _r4 = await client.get(
+                        _pg4["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
+                    )
+                    if _r4.status_code == 200 and len(_r4.content) > 300:
+                        return _r4.content, kit, "ddg_search", _pg4.get("playerUrl", _ddg_player_url)
+            except Exception as _e4b:
+                print(f"[ddg nav exc: {_e4b}]", end=" ", flush=True)
+        else:
+            print(f"[not found]", end=" ", flush=True)
 
     # ── 5. Fallback: cauta cu numele complet extras din URL-ul Flashscore ──────
     # Ex: /player/martinelli-gabriel-silva-xfC4qst7/ → "Gabriel Martinelli Silva"
@@ -1806,17 +1606,6 @@ async def download_all_images(data: dict, images_only: bool = False,
     home_team = data.get("match", {}).get("home_team", "")
     away_team = data.get("match", {}).get("away_team", "")
 
-    # ── API-Football: pre-fetch poze + kit numbers ────────────────
-    af_lookup = {}
-    if not player_only:
-        print(f"\n  API-Football: {home_team} vs {away_team}...", end=" ", flush=True)
-        try:
-            af_lookup = fetch_apifootball_players(home_team, away_team)
-            if not af_lookup:
-                print("meci negasit — fallback la SoFIFA")
-        except Exception as _afe:
-            print(f"eroare ({_afe}) — fallback la SoFIFA")
-
     ok = 0; fail = 0; missing = []
 
     # Incarca lista placeholder-elor existente (prefix_i -> name)
@@ -1964,53 +1753,20 @@ async def download_all_images(data: dict, images_only: bool = False,
                         print(f"  → {name} ...", end=" ", flush=True)
                     raw = kit = src = sofifa_url = None
 
-                    # ── Incearca API-Football mai intai (daca nu e override manual) ──
-                    _af_hit = None
-                    if af_lookup and not has_override:
-                        _best_af_score = 0.0
-                        for _af_norm, _af_data in af_lookup.items():
-                            _sc = max(
-                                _name_match(clean_name_for_check, _af_data["name"]),
-                                _name_match(clean_no_init_check,  _af_data["name"])
-                                if clean_no_init_check != clean_name_for_check else 0.0,
-                            )
-                            if _sc > _best_af_score:
-                                _best_af_score = _sc
-                                _af_hit = _af_data if _sc >= 0.5 else None
-
-                    if _af_hit:
+                    try:
+                        raw, kit, src, sofifa_url = await fetch_from_roster(
+                            name, roster, page, client, is_sub=is_sub,
+                            overrides=overrides, match_type=MATCH_TYPE,
+                            flashscore_url=p.get("flashscore_url", ""),
+                            team_id=_tid, team_name=_tname
+                        )
+                    except BaseException as e:
+                        print(f"\n      ⚠ Crash '{name}': {type(e).__name__}: {e}")
+                        traceback.print_exc()
                         try:
-                            _af_r = await client.get(
-                                _af_hit["photo_url"],
-                                headers={"User-Agent": UA},
-                                timeout=12,
-                                follow_redirects=True,
-                            )
-                            if _af_r.status_code == 200 and len(_af_r.content) > 500:
-                                raw = _af_r.content
-                                src = "api-football"
-                                kit = _af_hit.get("kit", "")
-                            else:
-                                _af_hit = None  # foto inexistenta → fallback SoFIFA
-                        except Exception:
-                            _af_hit = None
-
-                    # ── Fallback: SoFIFA (daca AF nu a gasit sau poza lipseste) ──
-                    if not raw:
-                        try:
-                            raw, kit, src, sofifa_url = await fetch_from_roster(
-                                name, roster, page, client, is_sub=is_sub,
-                                overrides=overrides, match_type=MATCH_TYPE,
-                                flashscore_url=p.get("flashscore_url", ""),
-                                team_id=_tid, team_name=_tname
-                            )
-                        except BaseException as e:
-                            print(f"\n      ⚠ Crash '{name}': {type(e).__name__}: {e}")
-                            traceback.print_exc()
-                            try:
-                                page = await ctx.new_page()
-                            except BaseException:
-                                pass
+                            page = await ctx.new_page()
+                        except BaseException:
+                            pass
 
                     # Actualizeaza kit number:
                     # - intotdeauna la rezerve (nu au numar de pe Flashscore)

@@ -1554,18 +1554,19 @@ async def fetch_from_roster(name: str, roster: list, page,
         _base_query = f"{clean} {_team_hint} sofifa".strip() if _team_hint else f"{clean} sofifa"
         _g_player_url = None
 
-        # ── Strategy A: httpx Bing search (fast, no headless detection) ──
+        # ── Strategy A: httpx search (Startpage → Bing → Google) ──
         _HTTPX_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                      "AppleWebKit/537.36 (KHTML, like Gecko) "
                      "Chrome/124.0.0.0 Safari/537.36")
         _httpx_engines = [
-            ("bing/httpx",   f"https://www.bing.com/search?q={_up6.quote_plus(_base_query)}&setlang=en&cc=US"),
-            ("google/httpx", f"https://www.google.com/search?q={_up6.quote_plus(_base_query)}&hl=en&gl=us&num=5"),
+            ("startpage/httpx", f"https://www.startpage.com/search?q={_up6.quote_plus(_base_query)}&language=english"),
+            ("bing/httpx",      f"https://www.bing.com/search?q={_up6.quote_plus(_base_query)}&setlang=en&cc=US"),
+            ("google/httpx",    f"https://www.google.com/search?q={_up6.quote_plus(_base_query)}&hl=en&gl=us&num=5"),
         ]
         for _eng, _s_url in _httpx_engines:
             print(f"\n        [{_eng}] {_base_query}...", end=" ", flush=True)
             try:
-                _sr = await client.get(_s_url, timeout=12, follow_redirects=True,
+                _sr = await client.get(_s_url, timeout=15, follow_redirects=True,
                                        headers={"User-Agent": _HTTPX_UA,
                                                 "Accept-Language": "en-US,en;q=0.9",
                                                 "Accept": "text/html,application/xhtml+xml"})
@@ -1580,18 +1581,16 @@ async def fetch_from_roster(name: str, roster: list, page,
             except Exception as _es:
                 print(f"[exc: {_es}]", end=" ", flush=True)
 
-        # ── Strategy B: Playwright browser (if httpx found nothing) ──
+        # ── Strategy B: Playwright browser (daca httpx nu a gasit nimic) ──
         if not _g_player_url:
             _SOFIFA_EXTRACT_JS = """() => {
                 function tryDecode(h) {
-                    // Google: /url?q=https://sofifa.com/...
                     if (h.includes('/url')) {
                         try {
                             const q = new URL(h).searchParams.get('q') || '';
                             if (q.includes('sofifa.com/player/')) return q.split('?')[0];
                         } catch(e) {}
                     }
-                    // Bing: /ck/a?!&&...&u=a1BASE64...
                     if (h.includes('/ck/a') || h.includes('bing.com')) {
                         try {
                             const u = new URL(h).searchParams.get('u') || '';
@@ -1601,7 +1600,6 @@ async def fetch_from_roster(name: str, roster: list, page,
                             }
                         } catch(e) {}
                     }
-                    // Direct link
                     if (h.includes('sofifa.com/player/')) return h.split('?')[0];
                     return null;
                 }
@@ -1610,26 +1608,17 @@ async def fetch_from_roster(name: str, roster: list, page,
                     const result = tryDecode(a.href || '');
                     if (result) return result;
                 }
-                // Scan raw HTML for sofifa player URLs
                 const rx = /https?:\\/\\/sofifa[.]com\\/player\\/[a-zA-Z0-9\\/_-]+/g;
                 const hits = (document.body.innerHTML.match(rx) || []);
                 if (hits.length) return hits[0].split('?')[0];
-                // Also scan for encoded sofifa URLs in bing tracking links
                 const rxEnc = /sofifa[.]com%2Fplayer%2F[a-zA-Z0-9%_-]+/g;
                 const hitsEnc = (document.body.innerHTML.match(rxEnc) || []);
                 if (hitsEnc.length) return 'https://' + decodeURIComponent(hitsEnc[0].split('%3F')[0]);
                 return null;
             }"""
-            try:
-                await page.context.add_cookies([
-                    {"name": "SOCS",    "value": "CAISHAgBEhIaAB", "domain": ".google.com", "path": "/"},
-                    {"name": "CONSENT", "value": "YES+cb",          "domain": ".google.com", "path": "/"},
-                ])
-            except Exception:
-                pass
             _pw_engines = [
-                ("google/pw", f"https://www.google.com/search?q={_up6.quote_plus(_base_query)}&hl=en&gl=us&num=5"),
-                ("bing/pw",   f"https://www.bing.com/search?q={_up6.quote_plus(_base_query)}&setlang=en"),
+                ("startpage/pw", f"https://www.startpage.com/search?q={_up6.quote_plus(_base_query)}&language=english"),
+                ("bing/pw",      f"https://www.bing.com/search?q={_up6.quote_plus(_base_query)}&setlang=en"),
             ]
             for _eng, _s_url in _pw_engines:
                 print(f"\n        [{_eng}] {_base_query}...", end=" ", flush=True)

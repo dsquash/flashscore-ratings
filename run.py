@@ -1172,43 +1172,40 @@ async def fetch_from_roster(name: str, roster: list, page,
         if photo_raw is not None:
             return photo_raw, kit, photo_src, best.get('playerUrl', '')
 
-    # ── 3.5. SoFIFA API: cauta in lotul echipei via api.sofifa.net ──
-    # Avantaj: nu e afectat de search engines, lucreaza direct cu datele
+    # ── 3.5. SoFIFA API via Playwright (browser trece de Cloudflare) ─
     if not photo_raw and team_id > 0:
+        import unicodedata as _ud35
+        def _norm35(s):
+            return _ud35.normalize('NFD', s.lower()).encode('ascii', 'ignore').decode().strip()
+
+        _clean_norm35 = _norm35(clean)
+        _toks35 = [t for t in _clean_norm35.split() if len(t) >= 3]
+        if not _toks35:
+            _toks35 = [_clean_norm35]
+
         print(f"\n        [api] team/{team_id} → {clean}...", end=" ", flush=True)
         try:
-            import unicodedata as _ud35
-            def _norm35(s):
-                return _ud35.normalize('NFD', s.lower()).encode('ascii', 'ignore').decode().strip()
-
-            _api_headers = {
-                "Accept": "application/json",
-                "User-Agent": "Mozilla/5.0",
-            }
-            _api_r = await client.get(
-                f"https://api.sofifa.net/team/{team_id}",
-                headers=_api_headers, timeout=12, follow_redirects=True
-            )
-            if _api_r.status_code == 200:
-                _api_data = _api_r.json().get("data", {})
-                _api_players = _api_data.get("players", [])
-                _clean_norm = _norm35(clean)
-                _toks = [t for t in _clean_norm.split() if len(t) >= 3]
+            await safe_goto(page, f"https://api.sofifa.net/team/{team_id}", timeout=30000)
+            await page.wait_for_timeout(1500)
+            _api_json = await page.evaluate("""() => {
+                try { return JSON.parse(document.body.innerText); }
+                catch(e) { return null; }
+            }""")
+            if _api_json and isinstance(_api_json, dict):
+                _api_players = (_api_json.get("data") or {}).get("players") or []
                 best_api = None; best_api_sc = -1
                 for _ap in _api_players:
-                    _cn  = _norm35(_ap.get("commonName") or "")
-                    _fn  = _norm35(_ap.get("firstName")  or "")
-                    _ln  = _norm35(_ap.get("lastName")   or "")
-                    _full = f"{_fn} {_ln}".strip()
+                    _cn   = _norm35(_ap.get("commonName") or "")
+                    _full = _norm35(f"{_ap.get('firstName','')} {_ap.get('lastName','')}".strip())
                     for _cand in [_cn, _full]:
                         if not _cand: continue
-                        sc = sum(1 for t in _toks if t in _cand) / max(len(_toks), 1)
+                        sc = sum(1 for t in _toks35 if t in _cand) / len(_toks35)
                         if sc > best_api_sc:
                             best_api_sc = sc; best_api = _ap
                 if best_api and best_api_sc >= 0.5:
                     _pid = best_api["id"]
                     _api_player_url = f"https://sofifa.com/player/{_pid}/"
-                    print(f"found id={_pid} sc={best_api_sc:.2f}", end=" ", flush=True)
+                    print(f"found id={_pid} ({best_api.get('commonName','')}) sc={best_api_sc:.2f}", end=" ", flush=True)
                     await safe_goto(page, _api_player_url, timeout=35000)
                     await page.wait_for_timeout(600)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -1238,8 +1235,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                             kit = (mClub || (mAny && !mNat && mAny) || mNat || [])[1] || '';
                         }
                         const canonical = document.querySelector('link[rel="canonical"]');
-                        const playerUrl = canonical ? canonical.href : window.location.href;
-                        return { photoUrl, kit, playerUrl };
+                        return { photoUrl, kit, playerUrl: canonical ? canonical.href : window.location.href };
                     }""", match_type) or {}
                     if _pg_api.get("kit"): kit = _pg_api["kit"]
                     if _pg_api.get("photoUrl"):
@@ -1249,9 +1245,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                         if _r_api.status_code == 200 and len(_r_api.content) > 300:
                             return _r_api.content, kit, "api_team", _pg_api.get("playerUrl", _api_player_url)
                 else:
-                    print(f"[not in roster, best_sc={best_api_sc:.2f}]", end=" ", flush=True)
+                    print(f"[not in roster sc={best_api_sc:.2f}]", end=" ", flush=True)
             else:
-                print(f"[api {_api_r.status_code}]", end=" ", flush=True)
+                print(f"[api no json]", end=" ", flush=True)
         except Exception as _e35:
             print(f"[api exc: {_e35}]", end=" ", flush=True)
 

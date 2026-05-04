@@ -1172,6 +1172,89 @@ async def fetch_from_roster(name: str, roster: list, page,
         if photo_raw is not None:
             return photo_raw, kit, photo_src, best.get('playerUrl', '')
 
+    # ── 3.5. SoFIFA API: cauta in lotul echipei via api.sofifa.net ──
+    # Avantaj: nu e afectat de search engines, lucreaza direct cu datele
+    if not photo_raw and team_id > 0:
+        print(f"\n        [api] team/{team_id} → {clean}...", end=" ", flush=True)
+        try:
+            import unicodedata as _ud35
+            def _norm35(s):
+                return _ud35.normalize('NFD', s.lower()).encode('ascii', 'ignore').decode().strip()
+
+            _api_headers = {
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            }
+            _api_r = await client.get(
+                f"https://api.sofifa.net/team/{team_id}",
+                headers=_api_headers, timeout=12, follow_redirects=True
+            )
+            if _api_r.status_code == 200:
+                _api_data = _api_r.json().get("data", {})
+                _api_players = _api_data.get("players", [])
+                _clean_norm = _norm35(clean)
+                _toks = [t for t in _clean_norm.split() if len(t) >= 3]
+                best_api = None; best_api_sc = -1
+                for _ap in _api_players:
+                    _cn  = _norm35(_ap.get("commonName") or "")
+                    _fn  = _norm35(_ap.get("firstName")  or "")
+                    _ln  = _norm35(_ap.get("lastName")   or "")
+                    _full = f"{_fn} {_ln}".strip()
+                    for _cand in [_cn, _full]:
+                        if not _cand: continue
+                        sc = sum(1 for t in _toks if t in _cand) / max(len(_toks), 1)
+                        if sc > best_api_sc:
+                            best_api_sc = sc; best_api = _ap
+                if best_api and best_api_sc >= 0.5:
+                    _pid = best_api["id"]
+                    _api_player_url = f"https://sofifa.com/player/{_pid}/"
+                    print(f"found id={_pid} sc={best_api_sc:.2f}", end=" ", flush=True)
+                    await safe_goto(page, _api_player_url, timeout=35000)
+                    await page.wait_for_timeout(600)
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await page.wait_for_timeout(400)
+                    await page.evaluate("window.scrollTo(0, 0)")
+                    _pg_api = await page.evaluate("""(matchType) => {
+                        let photoUrl = '';
+                        for (const img of document.querySelectorAll('img')) {
+                            const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
+                            for (const src of candidates) {
+                                const m = src.match(/\/players\/(\d+)\/(\d+)\//);
+                                if (m && parseInt(m[1]) > 0) {
+                                    photoUrl = src.replace('_120.png','_240.png').replace('_60.png','_240.png');
+                                    break;
+                                }
+                            }
+                            if (photoUrl) break;
+                        }
+                        let kit = '';
+                        const body = document.body.innerText;
+                        const mClub = body.match(/Kit[\s·]*Number[\s\S]{0,40}?Club[^0-9]{0,15}?(\d{1,3})/i);
+                        const mNat  = body.match(/Kit[\s·]*Number[\s\S]{0,40}?National[^0-9]{0,15}?(\d{1,3})/i);
+                        const mAny  = body.match(/Kit[\s·]*Number[^0-9\n]{0,30}?(\d{1,3})/i);
+                        if (matchType === 'national') {
+                            kit = (mNat||mClub||mAny||[])[1] || '';
+                        } else {
+                            kit = (mClub || (mAny && !mNat && mAny) || mNat || [])[1] || '';
+                        }
+                        const canonical = document.querySelector('link[rel="canonical"]');
+                        const playerUrl = canonical ? canonical.href : window.location.href;
+                        return { photoUrl, kit, playerUrl };
+                    }""", match_type) or {}
+                    if _pg_api.get("kit"): kit = _pg_api["kit"]
+                    if _pg_api.get("photoUrl"):
+                        _r_api = await client.get(
+                            _pg_api["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
+                        )
+                        if _r_api.status_code == 200 and len(_r_api.content) > 300:
+                            return _r_api.content, kit, "api_team", _pg_api.get("playerUrl", _api_player_url)
+                else:
+                    print(f"[not in roster, best_sc={best_api_sc:.2f}]", end=" ", flush=True)
+            else:
+                print(f"[api {_api_r.status_code}]", end=" ", flush=True)
+        except Exception as _e35:
+            print(f"[api exc: {_e35}]", end=" ", flush=True)
+
     # ── 4. Fallback final: cautare directa SoFIFA dupa nume ──────
     # (folosit cand jucatorul nu e in roster: ex. imprumut, jucator nou)
     print(f"\n        [direct search] {clean}...", end=" ", flush=True)

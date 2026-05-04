@@ -67,6 +67,11 @@ SOFIFA_HEADERS   = {
     "Origin": "https://sofifa.com",
 }
 
+# ── API-Football ───────────────────────────────────────────────
+API_FOOTBALL_KEY        = "3483b037385b9a88721f75d7f00ed5bc"
+API_FOOTBALL_BASE       = "https://v3.football.api-sports.io"
+API_FOOTBALL_PHOTO_BASE = "https://media.api-sports.io/football/players"
+
 
 # ══════════════════════════════════════════════════════════════
 #  STEP 1 — SCRAPE FLASHSCORE
@@ -641,6 +646,96 @@ def _search_keywords(name: str) -> list:
     if len(parts) >= 2 and parts[0] not in kws:
         kws.append(parts[0])
     return kws
+
+
+def fetch_apifootball_players(home_team: str, away_team: str) -> dict:
+    """
+    Cauta meciul in API-Football (azi ± 1 zi) dupa team names.
+    Returneaza: { normalized_name → { player_id, kit, photo_url, name } }
+    Foloseste doar fixtures/lineups (2 HTTP calls total).
+    """
+    from datetime import date, timedelta
+
+    af_headers = {"x-apisports-key": API_FOOTBALL_KEY}
+
+    def _team_score(api_name: str, fs_name: str) -> float:
+        """Cat de bine se potriveste numele din API cu cel din FlashScore."""
+        a = _norm(api_name)
+        f = _norm(fs_name)
+        toks = [t for t in f.split() if len(t) >= 3]
+        if not toks:
+            return 0.0
+        # potrivire directa: fiecare token din FS trebuie sa apara in stringul din API
+        return sum(1 for t in toks if t in a) / len(toks)
+
+    # Incearca azi, ieri, maine (meci live/recent)
+    fixture_id = None
+    best_overall = 0.0
+    for delta in [0, -1, 1]:
+        d = (date.today() + timedelta(days=delta)).isoformat()
+        try:
+            r = httpx.get(
+                f"{API_FOOTBALL_BASE}/fixtures",
+                params={"date": d},
+                headers=af_headers,
+                timeout=12,
+                follow_redirects=True,
+            )
+            if r.status_code != 200:
+                continue
+            fixtures = r.json().get("response", [])
+            for fx in fixtures:
+                h = fx["teams"]["home"]["name"]
+                a = fx["teams"]["away"]["name"]
+                # Incearca ambele ordini (home/away pot fi inversate)
+                s1 = min(_team_score(h, home_team), _team_score(a, away_team))
+                s2 = min(_team_score(a, home_team), _team_score(h, away_team))
+                s = max(s1, s2)
+                if s > best_overall:
+                    best_overall = s
+                    fixture_id = fx["fixture"]["id"]
+            if fixture_id and best_overall >= 0.5:
+                break
+        except Exception:
+            continue
+
+    if not fixture_id or best_overall < 0.5:
+        return {}
+
+    print(f"    [api-football] fixture {fixture_id} (match score {best_overall:.2f})", end=" ", flush=True)
+
+    # Extrage lineup: toti jucatorii cu ID, kit, nume
+    result = {}
+    try:
+        r = httpx.get(
+            f"{API_FOOTBALL_BASE}/fixtures/lineups",
+            params={"fixture": fixture_id},
+            headers=af_headers,
+            timeout=12,
+            follow_redirects=True,
+        )
+        if r.status_code == 200:
+            for team_data in r.json().get("response", []):
+                for group in ("startXI", "substitutes"):
+                    for entry in team_data.get(group, []):
+                        pl = entry["player"]
+                        pid  = pl.get("id")
+                        name = pl.get("name", "")
+                        kit  = str(pl.get("number") or "")
+                        if pid and name:
+                            result[_norm(name)] = {
+                                "player_id": pid,
+                                "kit": kit,
+                                "photo_url": f"{API_FOOTBALL_PHOTO_BASE}/{pid}.png",
+                                "name": name,
+                            }
+            print(f"→ {len(result)} jucatori")
+        else:
+            print(f"→ lineups err {r.status_code}")
+    except Exception as e:
+        print(f"→ lineups exc: {e}")
+
+    return result
 
 
 async def safe_goto(page, url: str, wait_until: str = "domcontentloaded",
@@ -1722,6 +1817,17 @@ async def download_all_images(data: dict, images_only: bool = False,
     home_team = data.get("match", {}).get("home_team", "")
     away_team = data.get("match", {}).get("away_team", "")
 
+    # ── API-Football: pre-fetch poze + kit numbers ────────────────
+    af_lookup = {}
+    if not player_only:
+        print(f"\n  API-Football: {home_team} vs {away_team}...", end=" ", flush=True)
+        try:
+            af_lookup = fetch_apifootball_players(home_team, away_team)
+            if not af_lookup:
+                print("meci negasit — fallback la SoFIFA")
+        except Exception as _afe:
+            print(f"eroare ({_afe}) — fallback la SoFIFA")
+
     ok = 0; fail = 0; missing = []
 
     # Incarca lista placeholder-elor existente (prefix_i -> name)
@@ -1869,20 +1975,53 @@ async def download_all_images(data: dict, images_only: bool = False,
                         print(f"  → {name} ...", end=" ", flush=True)
                     raw = kit = src = sofifa_url = None
 
-                    try:
-                        raw, kit, src, sofifa_url = await fetch_from_roster(
-                            name, roster, page, client, is_sub=is_sub,
-                            overrides=overrides, match_type=MATCH_TYPE,
-                            flashscore_url=p.get("flashscore_url", ""),
-                            team_id=_tid, team_name=_tname
-                        )
-                    except BaseException as e:
-                        print(f"\n      ⚠ Crash '{name}': {type(e).__name__}: {e}")
-                        traceback.print_exc()
+                    # ── Incearca API-Football mai intai (daca nu e override manual) ──
+                    _af_hit = None
+                    if af_lookup and not has_override:
+                        _best_af_score = 0.0
+                        for _af_norm, _af_data in af_lookup.items():
+                            _sc = max(
+                                _name_match(clean_name_for_check, _af_data["name"]),
+                                _name_match(clean_no_init_check,  _af_data["name"])
+                                if clean_no_init_check != clean_name_for_check else 0.0,
+                            )
+                            if _sc > _best_af_score:
+                                _best_af_score = _sc
+                                _af_hit = _af_data if _sc >= 0.5 else None
+
+                    if _af_hit:
                         try:
-                            page = await ctx.new_page()
-                        except BaseException:
-                            pass
+                            _af_r = await client.get(
+                                _af_hit["photo_url"],
+                                headers={"User-Agent": UA},
+                                timeout=12,
+                                follow_redirects=True,
+                            )
+                            if _af_r.status_code == 200 and len(_af_r.content) > 500:
+                                raw = _af_r.content
+                                src = "api-football"
+                                kit = _af_hit.get("kit", "")
+                            else:
+                                _af_hit = None  # foto inexistenta → fallback SoFIFA
+                        except Exception:
+                            _af_hit = None
+
+                    # ── Fallback: SoFIFA (daca AF nu a gasit sau poza lipseste) ──
+                    if not raw:
+                        try:
+                            raw, kit, src, sofifa_url = await fetch_from_roster(
+                                name, roster, page, client, is_sub=is_sub,
+                                overrides=overrides, match_type=MATCH_TYPE,
+                                flashscore_url=p.get("flashscore_url", ""),
+                                team_id=_tid, team_name=_tname
+                            )
+                        except BaseException as e:
+                            print(f"\n      ⚠ Crash '{name}': {type(e).__name__}: {e}")
+                            traceback.print_exc()
+                            try:
+                                page = await ctx.new_page()
+                            except BaseException:
+                                pass
 
                     # Actualizeaza kit number:
                     # - intotdeauna la rezerve (nu au numar de pe Flashscore)

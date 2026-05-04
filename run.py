@@ -1382,10 +1382,19 @@ async def fetch_from_roster(name: str, roster: list, page,
         _team_hint  = team_name.strip() if team_name else ""
         _base_query = f"{clean} {_team_hint} sofifa".strip() if _team_hint else f"{clean} sofifa"
 
+        # Pre-set Google consent cookie so we skip the GDPR consent page
+        try:
+            await page.context.add_cookies([
+                {"name": "SOCS",    "value": "CAISHAgBEhIaAB", "domain": ".google.com", "path": "/"},
+                {"name": "CONSENT", "value": "YES+cb",          "domain": ".google.com", "path": "/"},
+            ])
+        except Exception:
+            pass
+
         _g_player_url = None
         _search_engines = [
+            ("google", f"https://www.google.com/search?q={_up6.quote_plus(_base_query)}&hl=en&gl=us&num=5"),
             ("bing",   f"https://www.bing.com/search?q={_up6.quote_plus(_base_query)}&setlang=en"),
-            ("google", f"https://www.google.com/search?q={_up6.quote_plus(_base_query)}&hl=en&num=5"),
         ]
         for _eng, _s_url in _search_engines:
             print(f"\n        [{_eng}] {_base_query}...", end=" ", flush=True)

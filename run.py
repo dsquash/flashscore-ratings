@@ -1244,28 +1244,31 @@ async def fetch_from_roster(name: str, roster: list, page,
             for _enc in _uddg_hits:
                 _dec = _urlparse.unquote(_enc)
                 if "sofifa.com/player/" in _dec:
-                    _ddg_player_url = _re4.sub(r'/\d+$', '/customized', _dec.split("?")[0].rstrip('/'))
+                    _ddg_player_url = _dec.split("?")[0].rstrip('/')
                     break
         except Exception as _e4:
             print(f"[ddg exc: {_e4}]", end=" ", flush=True)
 
         if _ddg_player_url:
             print(f"found → {_ddg_player_url}", end=" ", flush=True)
+            _ddg_cu = _re4.sub(r'/\d+$', '/customized', _ddg_player_url)
+            _ddg_try_urls = [_ddg_player_url] + ([_ddg_cu] if _ddg_cu != _ddg_player_url else [])
             try:
-                await safe_goto(page, _ddg_player_url, timeout=35000)
-                await page.wait_for_timeout(600)
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(400)
-                await page.evaluate("window.scrollTo(0, 0)")
-                _pg4 = await page.evaluate(_PHOTO_JS, match_type) or {}
-                if _pg4.get("kit"):
-                    kit = _pg4["kit"]
-                if _pg4.get("photoUrl"):
-                    _r4 = await client.get(
-                        _pg4["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
-                    )
-                    if _r4.status_code == 200 and len(_r4.content) > 300:
-                        return _r4.content, kit, "ddg_search", _pg4.get("playerUrl", _ddg_player_url)
+                for _ddg_try in _ddg_try_urls:
+                    await safe_goto(page, _ddg_try, timeout=35000)
+                    await page.wait_for_timeout(600)
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await page.wait_for_timeout(400)
+                    await page.evaluate("window.scrollTo(0, 0)")
+                    _pg4 = await page.evaluate(_PHOTO_JS, match_type) or {}
+                    if _pg4.get("kit"):
+                        kit = _pg4["kit"]
+                    if _pg4.get("photoUrl"):
+                        _r4 = await client.get(
+                            _pg4["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
+                        )
+                        if _r4.status_code == 200 and len(_r4.content) > 300:
+                            return _r4.content, kit, "ddg_search", _pg4.get("playerUrl", _ddg_try)
             except Exception as _e4b:
                 print(f"[ddg nav exc: {_e4b}]", end=" ", flush=True)
         else:
@@ -1289,22 +1292,25 @@ async def fetch_from_roster(name: str, roster: list, page,
             )
             _sp_hits = _re5.findall(r'https?://sofifa\.com/player/[a-zA-Z0-9/_-]+', _sp_r.text)
             if _sp_hits:
-                _sp_url = _re5.sub(r'/\d+$', '/customized', _sp_hits[0].split('?')[0].rstrip('/'))
+                _sp_url = _sp_hits[0].split('?')[0].rstrip('/')
+                _sp_cu = _re5.sub(r'/\d+$', '/customized', _sp_url)
+                _sp_try_urls = [_sp_url] + ([_sp_cu] if _sp_cu != _sp_url else [])
                 print(f"found → {_sp_url}", end=" ", flush=True)
-                await safe_goto(page, _sp_url, timeout=35000)
-                await page.wait_for_timeout(600)
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(400)
-                await page.evaluate("window.scrollTo(0, 0)")
-                _pg5 = await page.evaluate(_PHOTO_JS, match_type) or {}
-                if _pg5.get("kit"):
-                    kit = _pg5["kit"]
-                if _pg5.get("photoUrl"):
-                    _r5 = await client.get(
-                        _pg5["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
-                    )
-                    if _r5.status_code == 200 and len(_r5.content) > 300:
-                        return _r5.content, kit, "startpage", _pg5.get("playerUrl", _sp_url)
+                for _sp_try in _sp_try_urls:
+                    await safe_goto(page, _sp_try, timeout=35000)
+                    await page.wait_for_timeout(600)
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await page.wait_for_timeout(400)
+                    await page.evaluate("window.scrollTo(0, 0)")
+                    _pg5 = await page.evaluate(_PHOTO_JS, match_type) or {}
+                    if _pg5.get("kit"):
+                        kit = _pg5["kit"]
+                    if _pg5.get("photoUrl"):
+                        _r5 = await client.get(
+                            _pg5["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
+                        )
+                        if _r5.status_code == 200 and len(_r5.content) > 300:
+                            return _r5.content, kit, "startpage", _pg5.get("playerUrl", _sp_try)
             else:
                 print(f"[no result]", end=" ", flush=True)
         except Exception as _e5:

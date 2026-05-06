@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.51
+- Photos: încearcă URL-ul original de pe DDG/Startpage, dacă nu găsește foto revine automat la varianta /customized
+
 ## v1.0.50
 - Photos: URL-urile de pe DDG/Startpage cu versiune numerică (ex: /260024) sunt acum convertite automat la /customized — rezolvă NOT FOUND pentru jucătorii brazilieni și alți jucători custom
 

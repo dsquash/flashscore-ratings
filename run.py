@@ -1253,13 +1253,16 @@ async def fetch_from_roster(name: str, roster: list, page,
             print(f"found → {_ddg_player_url}", end=" ", flush=True)
             _ddg_cu = _re4.sub(r'/\d+$', '/customized', _ddg_player_url)
             _ddg_try_urls = [_ddg_player_url] + ([_ddg_cu] if _ddg_cu != _ddg_player_url else [])
-            # Incerca httpx direct (evita Cloudflare headless block)
+            # Incerca urllib.request direct (trece Cloudflare, httpx e blocat)
+            import asyncio as _aio4, urllib.request as _ur4
             for _ddg_try in _ddg_try_urls:
                 try:
-                    _hx4 = await client.get(_ddg_try,
-                        headers={"User-Agent": _ddg_ua, "Accept-Language": "en-US,en;q=0.9"},
-                        timeout=15, follow_redirects=True)
-                    _hx4_imgs = _re4.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx4.text)
+                    def _ddg_fetch(_u=_ddg_try):
+                        _req = _ur4.Request(_u, headers={"User-Agent": _ddg_ua, "Accept-Language": "en-US,en;q=0.9"})
+                        with _ur4.urlopen(_req, timeout=15) as _rr:
+                            return _rr.read().decode("utf-8", errors="ignore")
+                    _hx4_html = await _aio4.to_thread(_ddg_fetch)
+                    _hx4_imgs = _re4.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx4_html)
                     if _hx4_imgs:
                         _rh4 = await client.get(_hx4_imgs[0], headers=hdrs, timeout=10, follow_redirects=True)
                         if _rh4.status_code == 200 and len(_rh4.content) > 300:
@@ -1310,13 +1313,16 @@ async def fetch_from_roster(name: str, roster: list, page,
                 _sp_cu  = _re5.sub(r'/\d+$', '/customized', _sp_url)
                 _sp_try_urls = [_sp_url] + ([_sp_cu] if _sp_cu != _sp_url else [])
                 print(f"found → {_sp_url}", end=" ", flush=True)
-                # Incerca httpx direct (evita Cloudflare headless block)
+                # Incerca urllib.request direct (trece Cloudflare, httpx e blocat)
+                import asyncio as _aio5, urllib.request as _ur5
                 for _sp_try in _sp_try_urls:
                     try:
-                        _hx5 = await client.get(_sp_try,
-                            headers={"User-Agent": _SP_UA, "Accept-Language": "en-US,en;q=0.9"},
-                            timeout=15, follow_redirects=True)
-                        _hx5_imgs = _re5.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx5.text)
+                        def _sp_fetch(_u=_sp_try):
+                            _req = _ur5.Request(_u, headers={"User-Agent": _SP_UA, "Accept-Language": "en-US,en;q=0.9"})
+                            with _ur5.urlopen(_req, timeout=15) as _rr:
+                                return _rr.read().decode("utf-8", errors="ignore")
+                        _hx5_html = await _aio5.to_thread(_sp_fetch)
+                        _hx5_imgs = _re5.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx5_html)
                         if _hx5_imgs:
                             _rh5 = await client.get(_hx5_imgs[0], headers=hdrs, timeout=10, follow_redirects=True)
                             if _rh5.status_code == 200 and len(_rh5.content) > 300:

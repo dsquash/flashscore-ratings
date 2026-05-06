@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.53
+- Photos: înlocuiește httpx cu urllib.request pentru fetch pagina SoFIFA — httpx primea 403 Cloudflare, urllib.request trece fără probleme
+
 ## v1.0.52
 - Photos: înlocuiește navigarea Playwright cu fetch httpx direct pe pagina SoFIFA — evită blocarea Cloudflare pentru jucătorii cu versiuni FC26 (260xxx)
 - Încearcă URL-ul original + /customized ca fallback; Playwright rămâne ultima opțiune

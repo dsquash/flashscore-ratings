@@ -1244,7 +1244,7 @@ async def fetch_from_roster(name: str, roster: list, page,
             for _enc in _uddg_hits:
                 _dec = _urlparse.unquote(_enc)
                 if "sofifa.com/player/" in _dec:
-                    _ddg_player_url = _dec.split("?")[0]
+                    _ddg_player_url = _re4.sub(r'/\d+$', '/customized', _dec.split("?")[0].rstrip('/'))
                     break
         except Exception as _e4:
             print(f"[ddg exc: {_e4}]", end=" ", flush=True)
@@ -1289,7 +1289,7 @@ async def fetch_from_roster(name: str, roster: list, page,
             )
             _sp_hits = _re5.findall(r'https?://sofifa\.com/player/[a-zA-Z0-9/_-]+', _sp_r.text)
             if _sp_hits:
-                _sp_url = _sp_hits[0].split('?')[0]
+                _sp_url = _re5.sub(r'/\d+$', '/customized', _sp_hits[0].split('?')[0].rstrip('/'))
                 print(f"found → {_sp_url}", end=" ", flush=True)
                 await safe_goto(page, _sp_url, timeout=35000)
                 await page.wait_for_timeout(600)

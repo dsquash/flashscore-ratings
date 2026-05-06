@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.50
+- Photos: URL-urile de pe DDG/Startpage cu versiune numerică (ex: /260024) sunt acum convertite automat la /customized — rezolvă NOT FOUND pentru jucătorii brazilieni și alți jucători custom
+
 ## v1.0.49
 - Updater: fixed URL encoding bug that caused "Lineup Panel.jsx" (and "START HERE.bat" on Windows) to fail during auto-update
 

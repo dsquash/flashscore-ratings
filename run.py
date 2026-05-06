@@ -144,7 +144,19 @@ def scrape_flashscore(url: str) -> dict:
             viewport={"width": 1400, "height": 900},
         )
         page = ctx.new_page()
-        page.goto(lineups_url, wait_until="domcontentloaded", timeout=30000)
+        try:
+            page.goto(lineups_url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as _nav_err:
+            _nav_msg = str(_nav_err)
+            if "ERR_NAME_NOT_RESOLVED" in _nav_msg or "ERR_INTERNET_DISCONNECTED" in _nav_msg or "ERR_NETWORK_CHANGED" in _nav_msg:
+                print("\n\n  ⚠ EROARE INTERNET: Nu se poate conecta la Flashscore.")
+                print("  Verificati conexiunea la internet si incercati din nou.\n")
+            elif "ERR_CONNECTION_TIMED_OUT" in _nav_msg or "Timeout" in _nav_msg:
+                print("\n\n  ⚠ TIMEOUT: Flashscore nu raspunde. Incercati din nou.\n")
+            else:
+                print(f"\n\n  ⚠ Eroare navigare: {_nav_msg[:120]}\n")
+            browser.close()
+            raise SystemExit(1)
 
         # Cookie banner
         try:
@@ -1258,6 +1270,45 @@ async def fetch_from_roster(name: str, roster: list, page,
                 print(f"[ddg nav exc: {_e4b}]", end=" ", flush=True)
         else:
             print(f"[not found]", end=" ", flush=True)
+
+    # ── 5. Startpage/httpx — fallback rapid daca DDG e rate-limited ─
+    if not photo_raw:
+        import urllib.parse as _up5
+        import re          as _re5
+        _team_hint5  = team_name.strip() if team_name else ""
+        _q5          = f"{clean} {_team_hint5} sofifa".strip() if _team_hint5 else f"{clean} sofifa"
+        _SP_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        print(f"\n        [startpage] {_q5}...", end=" ", flush=True)
+        try:
+            _sp_r = await client.get(
+                f"https://www.startpage.com/search?q={_up5.quote_plus(_q5)}&language=english",
+                timeout=15, follow_redirects=True,
+                headers={"User-Agent": _SP_UA, "Accept-Language": "en-US,en;q=0.9",
+                         "Accept": "text/html,application/xhtml+xml"}
+            )
+            _sp_hits = _re5.findall(r'https?://sofifa\.com/player/[a-zA-Z0-9/_-]+', _sp_r.text)
+            if _sp_hits:
+                _sp_url = _sp_hits[0].split('?')[0]
+                print(f"found → {_sp_url}", end=" ", flush=True)
+                await safe_goto(page, _sp_url, timeout=35000)
+                await page.wait_for_timeout(600)
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_timeout(400)
+                await page.evaluate("window.scrollTo(0, 0)")
+                _pg5 = await page.evaluate(_PHOTO_JS, match_type) or {}
+                if _pg5.get("kit"):
+                    kit = _pg5["kit"]
+                if _pg5.get("photoUrl"):
+                    _r5 = await client.get(
+                        _pg5["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
+                    )
+                    if _r5.status_code == 200 and len(_r5.content) > 300:
+                        return _r5.content, kit, "startpage", _pg5.get("playerUrl", _sp_url)
+            else:
+                print(f"[no result]", end=" ", flush=True)
+        except Exception as _e5:
+            print(f"[exc: {_e5}]", end=" ", flush=True)
 
     # Pastreaza kit-ul gasit (din roster / pagina jucatorului) chiar daca poza a esuat
     return None, kit, None, (best.get('playerUrl', '') if best else '')

@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.48
+- Search: restored Startpage/httpx as Step 5 fallback after DuckDuckGo (fixes rate-limiting issues with 12+ players)
+- Error handling: ERR_NAME_NOT_RESOLVED and other network errors now show clear Romanian messages instead of raw Playwright errors
+- DuckDuckGo remains Step 4 fallback after SoFIFA roster match
+
 ## v1.0.5
 - macOS: switched to native light theme so Aqua renders tk.Label/tk.Entry correctly (no more invisible text)
 - macOS: color remap applied automatically at widget creation, no code changes in body

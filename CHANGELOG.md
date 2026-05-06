@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.52
+- Photos: înlocuiește navigarea Playwright cu fetch httpx direct pe pagina SoFIFA — evită blocarea Cloudflare pentru jucătorii cu versiuni FC26 (260xxx)
+- Încearcă URL-ul original + /customized ca fallback; Playwright rămâne ultima opțiune
+
 ## v1.0.51
 - Photos: încearcă URL-ul original de pe DDG/Startpage, dacă nu găsește foto revine automat la varianta /customized
 

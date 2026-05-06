@@ -1253,6 +1253,20 @@ async def fetch_from_roster(name: str, roster: list, page,
             print(f"found → {_ddg_player_url}", end=" ", flush=True)
             _ddg_cu = _re4.sub(r'/\d+$', '/customized', _ddg_player_url)
             _ddg_try_urls = [_ddg_player_url] + ([_ddg_cu] if _ddg_cu != _ddg_player_url else [])
+            # Incerca httpx direct (evita Cloudflare headless block)
+            for _ddg_try in _ddg_try_urls:
+                try:
+                    _hx4 = await client.get(_ddg_try,
+                        headers={"User-Agent": _ddg_ua, "Accept-Language": "en-US,en;q=0.9"},
+                        timeout=15, follow_redirects=True)
+                    _hx4_imgs = _re4.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx4.text)
+                    if _hx4_imgs:
+                        _rh4 = await client.get(_hx4_imgs[0], headers=hdrs, timeout=10, follow_redirects=True)
+                        if _rh4.status_code == 200 and len(_rh4.content) > 300:
+                            return _rh4.content, kit, "ddg_search", _ddg_try
+                except Exception:
+                    pass
+            # Fallback: navigare Playwright
             try:
                 for _ddg_try in _ddg_try_urls:
                     await safe_goto(page, _ddg_try, timeout=35000)
@@ -1293,9 +1307,23 @@ async def fetch_from_roster(name: str, roster: list, page,
             _sp_hits = _re5.findall(r'https?://sofifa\.com/player/[a-zA-Z0-9/_-]+', _sp_r.text)
             if _sp_hits:
                 _sp_url = _sp_hits[0].split('?')[0].rstrip('/')
-                _sp_cu = _re5.sub(r'/\d+$', '/customized', _sp_url)
+                _sp_cu  = _re5.sub(r'/\d+$', '/customized', _sp_url)
                 _sp_try_urls = [_sp_url] + ([_sp_cu] if _sp_cu != _sp_url else [])
                 print(f"found → {_sp_url}", end=" ", flush=True)
+                # Incerca httpx direct (evita Cloudflare headless block)
+                for _sp_try in _sp_try_urls:
+                    try:
+                        _hx5 = await client.get(_sp_try,
+                            headers={"User-Agent": _SP_UA, "Accept-Language": "en-US,en;q=0.9"},
+                            timeout=15, follow_redirects=True)
+                        _hx5_imgs = _re5.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx5.text)
+                        if _hx5_imgs:
+                            _rh5 = await client.get(_hx5_imgs[0], headers=hdrs, timeout=10, follow_redirects=True)
+                            if _rh5.status_code == 200 and len(_rh5.content) > 300:
+                                return _rh5.content, kit, "startpage", _sp_try
+                    except Exception:
+                        pass
+                # Fallback: navigare Playwright
                 for _sp_try in _sp_try_urls:
                     await safe_goto(page, _sp_try, timeout=35000)
                     await page.wait_for_timeout(600)

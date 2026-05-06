@@ -84,12 +84,11 @@ def get_local_version() -> str:
 def _fetch_url(url: str, timeout: int = 10) -> bytes:
     import urllib.request
     from urllib.parse import quote
-    # Encode only the path portion to handle spaces and special chars in filenames
+    # Encode the last path component to handle spaces and special chars in filenames
     if "raw.githubusercontent.com" in url:
-        parts = url.split("/", 7)  # split up to the filename part
-        if len(parts) == 8:
-            parts[7] = quote(parts[7], safe="/")
-            url = "/".join(parts)
+        parts = url.split("/")
+        parts[-1] = quote(parts[-1], safe="/")
+        url = "/".join(parts)
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return r.read()
 

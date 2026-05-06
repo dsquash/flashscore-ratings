@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.49
+- Updater: fixed URL encoding bug that caused "Lineup Panel.jsx" (and "START HERE.bat" on Windows) to fail during auto-update
+
 ## v1.0.48
 - Search: restored Startpage/httpx as Step 5 fallback after DuckDuckGo (fixes rate-limiting issues with 12+ players)
 - Error handling: ERR_NAME_NOT_RESOLVED and other network errors now show clear Romanian messages instead of raw Playwright errors

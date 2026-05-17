@@ -671,6 +671,25 @@ async def safe_goto(page, url: str, wait_until: str = "domcontentloaded",
     raise last_exc
 
 
+def _player_cdn_urls(player_id_str: str) -> list:
+    """
+    Construieste URL-uri CDN directe pentru un player ID SoFIFA.
+    cdn.sofifa.net nu are Cloudflare — imaginile pot fi descarcate direct.
+    Format: players/AAA/BBB/VV_360.png  (ID 6 cifre split 3+3)
+    """
+    sid = str(player_id_str).strip()
+    if len(sid) == 6:
+        path = f"{sid[:3]}/{sid[3:]}/"
+    elif len(sid) >= 9:
+        path = f"{sid[:3]}/{sid[3:6]}/{sid[6:9]}/"
+    elif len(sid) == 5:
+        path = f"{sid[:2]}/{sid[2:]}/"
+    else:
+        return []
+    base = f"https://cdn.sofifa.net/players/{path}"
+    return [f"{base}{v}_360.png" for v in ("26", "25", "24", "23")]
+
+
 async def _wait_past_cloudflare(page, base_ms: int = 4000):
     """Dupa navigare la SoFIFA, asteapta ca Cloudflare JS challenge sa se rezolve automat."""
     await page.wait_for_timeout(base_ms)
@@ -1261,6 +1280,16 @@ async def fetch_from_roster(name: str, roster: list, page,
             print(f"found → {_ddg_player_url}", end=" ", flush=True)
             _ddg_cu = _re4.sub(r'/\d+$', '/customized', _ddg_player_url)
             _ddg_try_urls = [_ddg_player_url] + ([_ddg_cu] if _ddg_cu != _ddg_player_url else [])
+            # Incearca CDN direct (fara a vizita pagina HTML → evita complet Cloudflare)
+            _m_pid4 = _re4.search(r'/player/(\d+)/', _ddg_player_url)
+            if _m_pid4:
+                for _cdn_u4 in _player_cdn_urls(_m_pid4.group(1)):
+                    try:
+                        _cdn_r4 = await client.get(_cdn_u4, headers=hdrs, timeout=8, follow_redirects=True)
+                        if _cdn_r4.status_code == 200 and len(_cdn_r4.content) > 300:
+                            return _cdn_r4.content, kit, "cdn_direct", _ddg_player_url
+                    except Exception:
+                        pass
             # Incerca urllib.request direct (trece Cloudflare, httpx e blocat)
             import asyncio as _aio4, urllib.request as _ur4
             for _ddg_try in _ddg_try_urls:
@@ -1323,6 +1352,16 @@ async def fetch_from_roster(name: str, roster: list, page,
                 _sp_cu  = _re5.sub(r'/\d+$', '/customized', _sp_url)
                 _sp_try_urls = [_sp_url] + ([_sp_cu] if _sp_cu != _sp_url else [])
                 print(f"found → {_sp_url}", end=" ", flush=True)
+                # Incearca CDN direct (fara a vizita pagina HTML → evita complet Cloudflare)
+                _m_pid5 = _re5.search(r'/player/(\d+)/', _sp_url)
+                if _m_pid5:
+                    for _cdn_u5 in _player_cdn_urls(_m_pid5.group(1)):
+                        try:
+                            _cdn_r5 = await client.get(_cdn_u5, headers=hdrs, timeout=8, follow_redirects=True)
+                            if _cdn_r5.status_code == 200 and len(_cdn_r5.content) > 300:
+                                return _cdn_r5.content, kit, "cdn_direct", _sp_url
+                        except Exception:
+                            pass
                 # Incerca urllib.request direct (trece Cloudflare, httpx e blocat)
                 import asyncio as _aio5, urllib.request as _ur5
                 for _sp_try in _sp_try_urls:

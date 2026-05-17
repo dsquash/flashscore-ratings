@@ -39,7 +39,10 @@ def main():
         url = LAST_URL.read_text(encoding="utf-8").strip()
         print(f"  URL from last_url.txt: {url}")
     else:
-        print("ERROR: no URL found. Pass it as an argument or run run.py first.")
+        print("⚠ Nu a fost gasit niciun URL salvat.")
+        print("  Fie pasati URL-ul ca argument:")
+        print('  python refresh_stats.py "https://www.flashscore.com/match/..."')
+        print("  Fie rulati mai intai Full Run din launcher pentru a salva URL-ul automat.")
         sys.exit(1)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,7 +57,8 @@ def main():
     try:
         import run as r
     except ImportError as e:
-        print(f"ERROR: could not import run.py: {e}")
+        print(f"⚠ Eroare la importul run.py: {e}")
+        print("  Asigurati-va ca run.py exista in acelasi folder cu refresh_stats.py.")
         sys.exit(1)
 
     print("\n[1/2] Re-scraping Flashscore...")
@@ -74,8 +78,12 @@ def main():
         try:
             with open(DATA_JSON, "r", encoding="utf-8") as f:
                 old_data = json.load(f)
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            print(f"\n⚠ data.json este corupt si nu poate fi citit: {e}")
+            print("  Continuam fara comparatie — datele vechi nu vor fi comparate.")
+            print("  Daca problema persista, ruleaza Full Run pentru a regenera data.json.\n")
+        except Exception as e:
+            print(f"\n⚠ Eroare la citirea data.json: {e}\n")
 
     print("\n[2/2] Comparing and saving...")
 

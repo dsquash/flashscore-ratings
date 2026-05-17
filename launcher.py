@@ -409,6 +409,7 @@ class App(_BASE_CLS):
                 import os
                 env = os.environ.copy()
                 env["PYTHONIOENCODING"] = "utf-8"
+                env["PYTHONUNBUFFERED"]  = "1"
                 self._proc = subprocess.Popen(
                     cmd, cwd=str(BASE_DIR),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -457,6 +458,7 @@ class App(_BASE_CLS):
                 import os
                 env = os.environ.copy()
                 env["PYTHONIOENCODING"] = "utf-8"
+                env["PYTHONUNBUFFERED"]  = "1"
                 self._proc = subprocess.Popen(
                     cmd, cwd=str(BASE_DIR),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

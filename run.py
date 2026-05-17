@@ -1472,7 +1472,14 @@ async def download_all_images(data: dict, images_only: bool = False,
     """
     player_only: daca e setat, descarca DOAR jucatorul cu acel nume (override rapid).
     """
-    from playwright.async_api import async_playwright
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        print("\n⚠ EROARE: Playwright nu este instalat.")
+        print("  Rulati urmatoarele comenzi in terminal si reporniti aplicatia:")
+        print("    pip install playwright")
+        print("    playwright install chromium")
+        return
 
     if player_only:
         print(f"\n[2/3] Downloading photo for: {player_only}...")
@@ -1497,14 +1504,24 @@ async def download_all_images(data: dict, images_only: bool = False,
         placeholders = {}
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-            ]
-        )
+        try:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                ]
+            )
+        except Exception as _pw_err:
+            _emsg = str(_pw_err)
+            if "Executable doesn" in _emsg or "chromium" in _emsg.lower() or "playwright install" in _emsg.lower():
+                print("\n⚠ EROARE: Chromium nu este instalat pentru Playwright.")
+                print("  Rulati in terminal:")
+                print("    playwright install chromium")
+            else:
+                print(f"\n⚠ EROARE la pornirea browserului: {_emsg}")
+            return
         ctx = await browser.new_context(
             user_agent=UA,
             viewport={"width": 1280, "height": 800},
@@ -1569,7 +1586,11 @@ async def download_all_images(data: dict, images_only: bool = False,
                 (data["away"]["substitutes"], "away_sub",    away_roster, away_team_id, away_team),
             ]
 
-            # ── 3. Per jucator: match in roster → descarca foto ──────────
+            # ── 3. Per jucator: descarca foto (paralel, max 3 simultan) ────
+            # 3a. Pre-procesare sincrona: kit din roster + skip cached
+            _dl_sem   = asyncio.Semaphore(3)
+            _dl_tasks = []
+
             for players, prefix, roster, _tid, _tname in groups:
                 is_sub = prefix.endswith("_sub")
                 for i, p in enumerate(players, 1):
@@ -1577,18 +1598,13 @@ async def download_all_images(data: dict, images_only: bool = False,
                     if not name:
                         continue
 
-                    dest = IMAGES_DIR / f"{prefix}_{i}.png"
-                    file_key = f"{prefix}_{i}"
-
-                    # Modul single-player: sare peste toti in afara de cel dorit
                     if player_only and _norm(name) != _norm(player_only):
-                        # Pastreaza numerele existente pentru jucatorii sarite
                         continue
 
-                    # Este placeholder daca a fost inregistrat in placeholders.json
+                    dest     = IMAGES_DIR / f"{prefix}_{i}.png"
+                    file_key = f"{prefix}_{i}"
                     is_placeholder = file_key in placeholders
 
-                    # In modul --images-only sau --player, forteaza re-download pt overrides
                     clean_name_for_check = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
                     clean_name_for_check = re.sub(r'\.$', '', clean_name_for_check).strip()
                     clean_no_init_check  = re.sub(r'\s+[A-Z]\.?$', '', clean_name_for_check).strip()
@@ -1597,14 +1613,10 @@ async def download_all_images(data: dict, images_only: bool = False,
                         for fs in overrides
                     )
 
-                    # In modul --player: sterge poza cache indiferent (re-download fortat)
                     if player_only and dest.exists():
                         dest.unlink(missing_ok=True)
                         is_placeholder = False
 
-                    # ── Kit din roster (merge si pt poze cached) ─────────────
-                    # Rezervele nu au numar de pe Flashscore — updatam din roster
-                    # chiar daca poza e deja in cache, ca sa nu piarda kit-ul.
                     if not p.get("number"):
                         _c  = clean_name_for_check
                         _ni = clean_no_init_check
@@ -1619,72 +1631,78 @@ async def download_all_images(data: dict, images_only: bool = False,
                         if _bk and _bs >= 0.3:
                             p["number"] = _bk
 
-                    # Sare peste cache daca:
-                    # - fisierul nu exista (normal)
-                    # - este placeholder (va fi re-descarcat)
-                    # - are override activ si rulam --images-only (re-descarcam cu noul URL)
                     if dest.exists() and not is_placeholder and not (images_only and has_override):
                         print(f"  ✓ {name} (cached)")
                         ok += 1
                         continue
 
-                    if is_placeholder:
-                        print(f"  → {name} (placeholder — retrying) ...", end=" ", flush=True)
-                    else:
-                        print(f"  → {name} ...", end=" ", flush=True)
-                    raw = kit = src = sofifa_url = None
+                    lbl = " (placeholder — retrying)" if is_placeholder else ""
+                    print(f"  → {name}{lbl}", flush=True)
+                    _dl_tasks.append({
+                        "name": name, "p": p, "is_sub": is_sub,
+                        "roster": roster, "_tid": _tid, "_tname": _tname,
+                        "dest": dest, "file_key": file_key,
+                    })
 
+            # 3b. Descarca in paralel (max 3 simultan, fiecare task isi creeaza propria pagina)
+            async def _fetch_one(_t):
+                async with _dl_sem:
+                    _pg = await ctx.new_page()
                     try:
-                        raw, kit, src, sofifa_url = await fetch_from_roster(
-                            name, roster, page, client, is_sub=is_sub,
-                            overrides=overrides, match_type=MATCH_TYPE,
-                            flashscore_url=p.get("flashscore_url", ""),
-                            team_id=_tid, team_name=_tname
+                        return await fetch_from_roster(
+                            _t["name"], _t["roster"], _pg, client,
+                            is_sub=_t["is_sub"], overrides=overrides,
+                            match_type=MATCH_TYPE,
+                            flashscore_url=_t["p"].get("flashscore_url", ""),
+                            team_id=_t["_tid"], team_name=_t["_tname"]
                         )
-                    except BaseException as e:
-                        print(f"\n      ⚠ Crash '{name}': {type(e).__name__}: {e}")
+                    except BaseException as _e:
+                        print(f"\n      ⚠ Crash '{_t['name']}': {type(_e).__name__}: {_e}")
                         traceback.print_exc()
+                        return None, None, None, ""
+                    finally:
                         try:
-                            page = await ctx.new_page()
-                        except BaseException:
+                            await _pg.close()
+                        except Exception:
                             pass
 
-                    # Actualizeaza kit number:
-                    # - intotdeauna la rezerve (nu au numar de pe Flashscore)
-                    # - la meciuri nationale (kit national, nu cel de club)
-                    # - la titulari fara numar
-                    if kit:
-                        if is_sub or not p.get("number") or MATCH_TYPE == "national":
-                            p["number"] = kit
+            _results = await asyncio.gather(*[_fetch_one(_t) for _t in _dl_tasks])
 
-                    # Stocheaza URL-ul SoFIFA folosit (pentru override manual ulterior)
-                    if sofifa_url:
-                        p["sofifa_url"] = sofifa_url
+            # 3c. Proceseaza rezultatele in ordinea initiala
+            for _t, (raw, kit, src, sofifa_url) in zip(_dl_tasks, _results):
+                p        = _t["p"]
+                dest     = _t["dest"]
+                file_key = _t["file_key"]
+                name     = _t["name"]
+                is_sub   = _t["is_sub"]
 
-                    if raw and save_image(raw, dest):
-                        num_label = f" #{p.get('number','')}" if p.get('number') else ""
-                        print(f"OK ({src}{num_label})")
-                        ok += 1
-                        # Poza reala descarcata — scoate din lista de placeholders
-                        placeholders.pop(file_key, None)
+                if kit:
+                    if is_sub or not p.get("number") or MATCH_TYPE == "national":
+                        p["number"] = kit
+                if sofifa_url:
+                    p["sofifa_url"] = sofifa_url
+
+                num_label = f" #{p.get('number','')}" if p.get('number') else ""
+                if raw and save_image(raw, dest):
+                    print(f"  ✓ {name}: OK ({src}{num_label})")
+                    ok += 1
+                    placeholders.pop(file_key, None)
+                else:
+                    safe_name = re.sub(r'[^\w\s\-]', '', name).strip()
+                    safe_name = re.sub(r'\s+', '_', safe_name)
+                    if generate_placeholder(name, dest):
+                        named_dest = IMAGES_DIR / f"{safe_name}_placeholder.png"
+                        try:
+                            import shutil
+                            shutil.copy2(str(dest), str(named_dest))
+                        except Exception:
+                            pass
+                        print(f"  ✗ {name}: NOT FOUND → placeholder ({safe_name}_placeholder.png)")
                     else:
-                        # Genereaza placeholder cu numele jucatorului
-                        if generate_placeholder(name, dest):
-                            safe_name = re.sub(r'[^\w\s\-]', '', name).strip()
-                            safe_name = re.sub(r'\s+', '_', safe_name)
-                            named_dest = IMAGES_DIR / f"{safe_name}_placeholder.png"
-                            try:
-                                import shutil
-                                shutil.copy2(str(dest), str(named_dest))
-                            except Exception:
-                                pass
-                            print(f"NOT FOUND → placeholder ({safe_name}_placeholder.png)")
-                        else:
-                            print("NOT FOUND")
-                        # Inregistreaza ca placeholder ca sa fie re-incarcat data viitoare
-                        placeholders[file_key] = name
-                        missing.append(name)
-                        fail += 1
+                        print(f"  ✗ {name}: NOT FOUND")
+                    placeholders[file_key] = name
+                    missing.append(name)
+                    fail += 1
 
         # Salveaza placeholders.json actualizat
         try:

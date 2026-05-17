@@ -93,6 +93,19 @@ def _fetch_url(url: str, timeout: int = 10) -> bytes:
         return r.read()
 
 
+def _verify_file(data: bytes, filename: str) -> bool:
+    """Verifica integritatea unui fisier descarcat (marime minima + sintaxa Python)."""
+    if len(data) < 50:
+        return False
+    if filename.endswith(".py"):
+        import ast
+        try:
+            ast.parse(data.decode("utf-8", errors="replace"))
+        except SyntaxError:
+            return False
+    return True
+
+
 def get_remote_version() -> str:
     data = _fetch_url(f"{RAW_BASE}/version.txt")
     return data.decode("utf-8").strip()
@@ -149,9 +162,12 @@ def apply_update(progress_cb=None) -> tuple:
 
         try:
             data = _fetch_url(url, timeout=30)
-            dest.write_bytes(data)
-            updated.append(filename)
-            ok = True
+            if not _verify_file(data, filename):
+                failed.append(f"{filename}: integritate esuata (fisier corupt sau prea mic)")
+            else:
+                dest.write_bytes(data)
+                updated.append(filename)
+                ok = True
         except Exception as e:
             failed.append(f"{filename}: {e}")
 

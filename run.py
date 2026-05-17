@@ -690,12 +690,24 @@ def _player_cdn_urls(player_id_str: str) -> list:
     return [f"{base}{v}_360.png" for v in ("26", "25", "24", "23")]
 
 
-async def _wait_past_cloudflare(page, base_ms: int = 4000):
-    """Dupa navigare la SoFIFA, asteapta ca Cloudflare JS challenge sa se rezolve automat."""
+async def _wait_past_cloudflare(page, base_ms: int = 6000):
+    """
+    Asteapta ca Cloudflare JS challenge (~5s) sa se rezolve si redirect-ul sa se termine.
+    Dupa challenge, Cloudflare face un redirect intern — trebuie sa asteptam si asta.
+    """
     await page.wait_for_timeout(base_ms)
-    title = await page.title()
-    if "just a moment" in title.lower() or "checking your browser" in title.lower():
-        await page.wait_for_timeout(7000)
+    # Daca inca suntem pe pagina de challenge, mai asteptam
+    try:
+        title = await page.title()
+        if "just a moment" in title.lower() or "checking your browser" in title.lower():
+            await page.wait_for_timeout(6000)
+    except Exception:
+        await page.wait_for_timeout(3000)
+    # Asteptam ca orice navigare pendinte (redirect dupa challenge) sa se termine
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=8000)
+    except Exception:
+        pass
 
 
 async def get_sofifa_team_roster(team_name: str, page,

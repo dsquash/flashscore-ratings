@@ -671,6 +671,14 @@ async def safe_goto(page, url: str, wait_until: str = "domcontentloaded",
     raise last_exc
 
 
+async def _wait_past_cloudflare(page, base_ms: int = 4000):
+    """Dupa navigare la SoFIFA, asteapta ca Cloudflare JS challenge sa se rezolve automat."""
+    await page.wait_for_timeout(base_ms)
+    title = await page.title()
+    if "just a moment" in title.lower() or "checking your browser" in title.lower():
+        await page.wait_for_timeout(7000)
+
+
 async def get_sofifa_team_roster(team_name: str, page,
                                  match_type: str = "club") -> tuple:
     """
@@ -832,7 +840,7 @@ async def get_sofifa_team_roster(team_name: str, page,
             search_url = (f"https://sofifa.com/teams?keyword="
                           f"{variant.replace(' ', '+')}{type_filter}&hl=en-US")
             await safe_goto(page, search_url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(600)
+            await _wait_past_cloudflare(page)
             href = await page.evaluate(JS_FIND_BEST, _norm(variant))
             if not href:
                 # Fallback: cauta orice link cu /team/ pe pagina, nu doar in table
@@ -869,10 +877,10 @@ async def get_sofifa_team_roster(team_name: str, page,
         # Tabelul de jucatori se incarca din HTML initial — domcontentloaded e suficient
         # si evita timeout-uri de 30s cu networkidle (ex. Dortmund)
         await page.goto(href, wait_until="domcontentloaded", timeout=30000)
-        await page.wait_for_timeout(600)
+        await _wait_past_cloudflare(page)
         # Scroll pentru lazy-loading imagini
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await page.wait_for_timeout(400)
+        await page.wait_for_timeout(800)
         await page.evaluate("window.scrollTo(0, 0)")
 
         # Logo echipa — SoFIFA: cdn.sofifa.net/teams/{size}/{id}.png
@@ -1011,10 +1019,10 @@ async def fetch_from_roster(name: str, roster: list, page,
             print(f"[override] ", end=" ", flush=True)
             try:
                 await safe_goto(page, override_url, timeout=35000)
-                await page.wait_for_timeout(500)
+                await _wait_past_cloudflare(page)
                 # Scroll complet ca sa triggeram lazy-loading
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(600)
+                await page.wait_for_timeout(800)
                 await page.evaluate("window.scrollTo(0, 0)")
 
                 pg = await page.evaluate("""(matchType) => {
@@ -1120,10 +1128,10 @@ async def fetch_from_roster(name: str, roster: list, page,
         if need_page and best.get('playerUrl'):
             try:
                 await safe_goto(page, best['playerUrl'], timeout=35000)
-                await page.wait_for_timeout(600)
+                await _wait_past_cloudflare(page)
                 # Scroll complet pentru lazy-loading (kit number + poze)
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(800)
                 await page.evaluate("window.scrollTo(0, 0)")
                 pg = await page.evaluate("""(matchType) => {
                     let photoUrl = '';
@@ -1262,6 +1270,8 @@ async def fetch_from_roster(name: str, roster: list, page,
                         with _ur4.urlopen(_req, timeout=15) as _rr:
                             return _rr.read().decode("utf-8", errors="ignore")
                     _hx4_html = await _aio4.to_thread(_ddg_fetch)
+                    if "just a moment" in _hx4_html[:2000].lower():
+                        continue  # Cloudflare challenge — skip la Playwright fallback
                     _hx4_imgs = _re4.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx4_html)
                     if _hx4_imgs:
                         _rh4 = await client.get(_hx4_imgs[0], headers=hdrs, timeout=10, follow_redirects=True)
@@ -1273,9 +1283,9 @@ async def fetch_from_roster(name: str, roster: list, page,
             try:
                 for _ddg_try in _ddg_try_urls:
                     await safe_goto(page, _ddg_try, timeout=35000)
-                    await page.wait_for_timeout(600)
+                    await _wait_past_cloudflare(page)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await page.wait_for_timeout(400)
+                    await page.wait_for_timeout(800)
                     await page.evaluate("window.scrollTo(0, 0)")
                     _pg4 = await page.evaluate(_PHOTO_JS, match_type) or {}
                     if _pg4.get("kit"):
@@ -1322,6 +1332,8 @@ async def fetch_from_roster(name: str, roster: list, page,
                             with _ur5.urlopen(_req, timeout=15) as _rr:
                                 return _rr.read().decode("utf-8", errors="ignore")
                         _hx5_html = await _aio5.to_thread(_sp_fetch)
+                        if "just a moment" in _hx5_html[:2000].lower():
+                            continue  # Cloudflare challenge — skip la Playwright fallback
                         _hx5_imgs = _re5.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx5_html)
                         if _hx5_imgs:
                             _rh5 = await client.get(_hx5_imgs[0], headers=hdrs, timeout=10, follow_redirects=True)
@@ -1332,9 +1344,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                 # Fallback: navigare Playwright
                 for _sp_try in _sp_try_urls:
                     await safe_goto(page, _sp_try, timeout=35000)
-                    await page.wait_for_timeout(600)
+                    await _wait_past_cloudflare(page)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await page.wait_for_timeout(400)
+                    await page.wait_for_timeout(800)
                     await page.evaluate("window.scrollTo(0, 0)")
                     _pg5 = await page.evaluate(_PHOTO_JS, match_type) or {}
                     if _pg5.get("kit"):

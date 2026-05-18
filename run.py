@@ -687,7 +687,7 @@ def _player_cdn_urls(player_id_str: str) -> list:
     else:
         return []
     base = f"https://cdn.sofifa.net/players/{path}"
-    return [f"{base}{v}_360.png" for v in ("26", "25", "24", "23")]
+    return [f"{base}{v}_240.png" for v in ("26", "25", "24", "23")]
 
 
 async def _wait_past_cloudflare(page, base_ms: int = 6000):

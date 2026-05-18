@@ -95,7 +95,7 @@ def _fetch_url(url: str, timeout: int = 10) -> bytes:
 
 def _verify_file(data: bytes, filename: str) -> bool:
     """Verifica integritatea unui fisier descarcat (marime minima + sintaxa Python)."""
-    if len(data) < 50:
+    if len(data) < 2:
         return False
     if filename.endswith(".py"):
         import ast

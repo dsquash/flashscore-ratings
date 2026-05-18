@@ -897,7 +897,10 @@ async def get_sofifa_team_roster(team_name: str, page,
 
         if not href:
             title = await page.title()
-            print(f"      ⚠ '{team_name}' not found on sofifa.com/teams (page: '{title}')")
+            if "just a moment" in title.lower() or "checking your browser" in title.lower():
+                print(f"      ℹ '{team_name}': SoFIFA team page blocked by Cloudflare — using search fallback for photos")
+            else:
+                print(f"      ⚠ '{team_name}' not found on sofifa.com/teams (page: '{title}')")
             return 0, [], ""
 
         m = re.search(r'/team/(\d+)', href)

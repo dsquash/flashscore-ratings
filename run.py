@@ -1560,11 +1560,13 @@ async def download_all_images(data: dict, images_only: bool = False,
     async with async_playwright() as pw:
         try:
             browser = await pw.chromium.launch(
-                headless=True,
+                headless=False,   # headless e detectat de Cloudflare; headed trece challenge-ul
                 args=[
                     "--no-sandbox",
                     "--disable-blink-features=AutomationControlled",
                     "--disable-dev-shm-usage",
+                    "--window-position=9999,9999",  # off-screen — nu se vede
+                    "--window-size=1280,800",
                 ]
             )
         except Exception as _pw_err:

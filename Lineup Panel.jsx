@@ -108,6 +108,11 @@
     btnRefreshStats.alignment = ["fill", "center"];
     btnRefreshStats.preferredSize = [240, 30];
 
+    // ── Buton Refresh + Poze ──────────────────────────────────
+    var btnRefreshFull = panel.add("button", undefined, "\u21BB  Refresh + Poze");
+    btnRefreshFull.alignment = ["fill", "center"];
+    btnRefreshFull.preferredSize = [240, 30];
+
     // ── Sectiunea Render ───────────────────────────────────────
     panel.add("panel", undefined, undefined).preferredSize = [240, 2];
 
@@ -401,6 +406,72 @@
         } else {
             statusTxt.text = "Refresh Stats \u2014 done (comps not updated).";
             alert("refresh_comps.jsx not found.\nStats were updated in data.json but compositions were not refreshed.");
+        }
+
+        try { panel.layout.layout(true); } catch(e) {}
+    };
+
+    // ── onClick: Refresh + Poze ──────────────────────────────
+    btnRefreshFull.onClick = function() {
+        var scriptPath  = dir + "/refresh_stats.py";
+        var refreshJsx  = dir + "/refresh_comps.jsx";
+        var populateJsx = dir + "/populate_lineup.jsx";
+        var summaryPath = dir + "/flashscore_output/last_refresh_summary.txt";
+
+        if (!(new File(scriptPath)).exists) {
+            alert("refresh_stats.py was not found in:\n" + dir);
+            return;
+        }
+
+        // ── Step 1: run Python scraper + download missing photos ──
+        statusTxt.text = "Refreshing stats + downloading photos...";
+        try { panel.layout.layout(true); } catch(e) {}
+
+        var pyBin = "python3";
+        var pyFile = new File(dir + "/.python_path");
+        if (pyFile.exists) {
+            pyFile.open("r");
+            pyBin = pyFile.read().replace(/[\r\n]/g, "");
+            pyFile.close();
+        }
+
+        var isMac = ($.os.toLowerCase().indexOf("mac") >= 0);
+        if (isMac) {
+            var macCmd = '"' + pyBin + '" "' + scriptPath + '" --download-missing';
+            system.callSystem(macCmd);
+        } else {
+            var winPath = scriptPath.replace(/\//g, "\\\\");
+            system.callSystem('cmd /c python "' + winPath + '" --download-missing >/dev/null 2>&1');
+        }
+
+        // ── Step 2: read and show summary ─────────────────────────
+        var sf = new File(summaryPath);
+        var summaryText = "";
+        if (sf.exists) {
+            sf.encoding = "UTF-8";
+            sf.open("r");
+            summaryText = sf.read();
+            sf.close();
+        }
+        if (summaryText) {
+            alert("REFRESH + POZE\n\n" + summaryText);
+        }
+
+        // ── Step 3: update AE compositions ────────────────────────
+        var fJsx = new File(refreshJsx);
+        if (fJsx.exists) {
+            statusTxt.text = "Updating compositions...";
+            try { panel.layout.layout(true); } catch(e) {}
+            try {
+                $.global.__LINEUP_SCRIPTS_DIR__ = dir;
+                $.evalFile(fJsx);
+                statusTxt.text = "Refresh + Poze \u2014 done.";
+            } catch(e) {
+                statusTxt.text = "ERROR updating comps \u2014 see alert.";
+                alert("Error in refresh_comps.jsx:\n" + (e.message || String(e)));
+            }
+        } else {
+            statusTxt.text = "Refresh + Poze \u2014 done (comps not updated).";
         }
 
         try { panel.layout.layout(true); } catch(e) {}

@@ -413,19 +413,12 @@
 
     // ── onClick: Refresh + Poze ──────────────────────────────
     btnRefreshFull.onClick = function() {
-        var scriptPath  = dir + "/refresh_stats.py";
-        var refreshJsx  = dir + "/refresh_comps.jsx";
-        var populateJsx = dir + "/populate_lineup.jsx";
-        var summaryPath = dir + "/flashscore_output/last_refresh_summary.txt";
+        var scriptPath = dir + "/refresh_stats.py";
 
         if (!(new File(scriptPath)).exists) {
             alert("refresh_stats.py was not found in:\n" + dir);
             return;
         }
-
-        // ── Step 1: run Python scraper + download missing photos ──
-        statusTxt.text = "Refreshing stats + downloading photos...";
-        try { panel.layout.layout(true); } catch(e) {}
 
         var pyBin = "python3";
         var pyFile = new File(dir + "/.python_path");
@@ -436,43 +429,19 @@
         }
 
         var isMac = ($.os.toLowerCase().indexOf("mac") >= 0);
+
+        // Ruleaza in background — altfel AE se blocheaza 2-5 min cat dureaza Playwright
         if (isMac) {
-            var macCmd = '"' + pyBin + '" "' + scriptPath + '" --download-missing';
-            system.callSystem(macCmd);
+            var macCmd = '"' + pyBin + '" "' + scriptPath + '" --download-missing > /dev/null 2>&1 &';
+            system.callSystem("bash -c '" + macCmd + "'");
         } else {
             var winPath = scriptPath.replace(/\//g, "\\\\");
-            system.callSystem('cmd /c python "' + winPath + '" --download-missing >/dev/null 2>&1');
+            system.callSystem('cmd /c start /b python "' + winPath + '" --download-missing');
         }
 
-        // ── Step 2: read and show summary ─────────────────────────
-        var sf = new File(summaryPath);
-        var summaryText = "";
-        if (sf.exists) {
-            sf.encoding = "UTF-8";
-            sf.open("r");
-            summaryText = sf.read();
-            sf.close();
-        }
-        if (summaryText) {
-            alert("REFRESH + POZE\n\n" + summaryText);
-        }
-
-        // ── Step 3: update AE compositions ────────────────────────
-        var fJsx = new File(refreshJsx);
-        if (fJsx.exists) {
-            statusTxt.text = "Updating compositions...";
-            try { panel.layout.layout(true); } catch(e) {}
-            try {
-                $.global.__LINEUP_SCRIPTS_DIR__ = dir;
-                $.evalFile(fJsx);
-                statusTxt.text = "Refresh + Poze \u2014 done.";
-            } catch(e) {
-                statusTxt.text = "ERROR updating comps \u2014 see alert.";
-                alert("Error in refresh_comps.jsx:\n" + (e.message || String(e)));
-            }
-        } else {
-            statusTxt.text = "Refresh + Poze \u2014 done (comps not updated).";
-        }
+        statusTxt.text = "\u21BB Download poze pornit...";
+        alert("Download poze pornit in background.\n\nDureaza 2-4 minute (descarca SoFIFA).\nDupa ce termina, apasa:\n  1. \u25B6 Run \u2192 POPULATE\n  2. \u21BB Refresh Stats");
+        statusTxt.text = "Refresh + Poze \u2014 running in background.";
 
         try { panel.layout.layout(true); } catch(e) {}
     };

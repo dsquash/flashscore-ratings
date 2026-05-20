@@ -207,6 +207,11 @@ class App(_BASE_CLS):
                                       **self._btn_kw("primary"))
         self.btn_refresh.pack(side="left", padx=(10, 0), ipadx=4, ipady=4)
 
+        self.btn_refresh_full = ttk.Button(primary_row, text="↻  Refresh + Poze",
+                                           command=self._run_refresh_full,
+                                           **self._btn_kw("info" if _BOOT else "primary"))
+        self.btn_refresh_full.pack(side="left", padx=(10, 0), ipadx=4, ipady=4)
+
         # ── Secondary actions ─────────────────────────────────────
         sec_row = ttk.Frame(root, padding=(PAD, PAD_S, PAD, 0))
         sec_row.pack(fill="x")
@@ -331,7 +336,7 @@ class App(_BASE_CLS):
     def _set_running(self, running: bool):
         self._running = running
         state = ["disabled"] if running else ["!disabled"]
-        for w in (self.btn_run, self.btn_refresh, self.btn_redownload):
+        for w in (self.btn_run, self.btn_refresh, self.btn_refresh_full, self.btn_redownload):
             w.state(state)
         if not running:
             self.status_var.set("Ready.")
@@ -397,6 +402,7 @@ class App(_BASE_CLS):
             cmd.extend(extra_args)
 
         label = "Full Run" if (script == "run.py" and not extra_args) else \
+                "Refresh + Poze" if (script == "refresh_stats.py" and extra_args and "--download-missing" in extra_args) else \
                 "Refresh Stats" if script == "refresh_stats.py" else "Re-download"
         self._log(f"\n{'─'*50}\n▶ {label}  [{self.match_type.get()}]\n{'─'*50}\n")
         self.status_var.set(f"Running: {label}...")
@@ -440,9 +446,10 @@ class App(_BASE_CLS):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _run_full(self):       self._run_script("run.py")
-    def _run_redownload(self): self._run_script("run.py", extra_args=["--images-only"])
-    def _run_refresh(self):    self._run_script("refresh_stats.py")
+    def _run_full(self):         self._run_script("run.py")
+    def _run_redownload(self):   self._run_script("run.py", extra_args=["--images-only"])
+    def _run_refresh(self):      self._run_script("refresh_stats.py")
+    def _run_refresh_full(self): self._run_script("refresh_stats.py", extra_args=["--download-missing"])
 
     def _run_player_download(self, player_name: str):
         """Descarca poza unui singur jucator (dupa ce s-a setat un override)."""

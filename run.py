@@ -1234,7 +1234,16 @@ async def fetch_from_roster(name: str, roster: list, page,
         import urllib.parse  as _urlparse
         import re            as _re4
 
+        # Alias-uri echipe nationale pentru search engines (SoFIFA indexeaza altfel decat Flashscore)
+        _SEARCH_NT_ALIASES = {
+            "czech republic": "czechia", "republic of ireland": "ireland",
+            "united states": "usa", "south korea": "korea", "north korea": "north korea",
+            "ivory coast": "cote d'ivoire", "cape verde": "cape verde islands",
+            "dr congo": "congo dr", "trinidad and tobago": "trinidad",
+            "bosnia and herzegovina": "bosnia", "north macedonia": "north macedonia",
+        }
         _team_hint4 = team_name.strip() if team_name else ""
+        _team_hint4 = _SEARCH_NT_ALIASES.get(_team_hint4.lower(), _team_hint4)
         _ddg_query  = f"{clean} {_team_hint4} sofifa".strip() if _team_hint4 else f"{clean} sofifa"
         print(f"\n        [ddg] {_ddg_query}...", end=" ", flush=True)
 
@@ -1349,7 +1358,11 @@ async def fetch_from_roster(name: str, roster: list, page,
     if not photo_raw:
         import urllib.parse as _up5
         import re          as _re5
+        _NT_AL5 = {"czech republic":"czechia","republic of ireland":"ireland","united states":"usa",
+                   "south korea":"korea","ivory coast":"cote d'ivoire","bosnia and herzegovina":"bosnia",
+                   "north macedonia":"north macedonia","dr congo":"congo dr","cape verde":"cape verde islands"}
         _team_hint5  = team_name.strip() if team_name else ""
+        _team_hint5  = _NT_AL5.get(_team_hint5.lower(), _team_hint5)
         _q5          = f"{clean} {_team_hint5} sofifa".strip() if _team_hint5 else f"{clean} sofifa"
         _SP_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")

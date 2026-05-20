@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.54
+- Search: alias-uri echipe naționale pentru DDG & Startpage (ex: "Czech Republic" → "czechia") — îmbunătățește rezultatele pentru meciuri de naționale
+
 ## v1.0.53
 - Photos: înlocuiește httpx cu urllib.request pentru fetch pagina SoFIFA — httpx primea 403 Cloudflare, urllib.request trece fără probleme
 

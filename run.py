@@ -1077,598 +1077,90 @@ async def fetch_from_roster(name: str, roster: list, page,
                              team_name: str = "", img_src: str = "",
                              ss_ctx=None):
     """
-    Cauta jucatorul in roster-ul pre-incarcat al echipei.
-    - is_sub=True: INTOTDEAUNA viziteaza pagina jucatorului pentru kit number
-    - overrides: dict cu mapari manuale Flashscore name → SoFIFA URL
-    - match_type: 'club' sau 'national' (pentru kit number preferat)
-    - team_id: SoFIFA team ID for search filtering and club verification
-    Returneaza (photo_bytes, kit_number, source_label, sofifa_url) sau (None, '', None, '').
+    Descarca poza jucatorului via Sofascore (primar) + Flashscore (fallback).
+    Returneaza (photo_bytes, kit_number, source_label, sofifa_url).
     """
     clean = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
     clean = re.sub(r'\.$', '', clean).strip()
-    # Varianta fara initiala: "Martinelli G" → "Martinelli"
+    # Varianta fara initiala: "Martinelli G." → "Martinelli"
     clean_no_init = re.sub(r'(\s+[A-Z][a-z]{0,2}\.?)+$', '', clean).strip()
 
-    hdrs = {"User-Agent": UA, "Referer": "https://sofifa.com/"}
-
-    # ── 0.5. GeniScout via Startpage → fmscout ID ─────────────────
-    # Acoperire ~90%+, inclusiv ligi ne-licentiate (Brazilia, America de Sud etc.)
-    try:
-        import urllib.request as _urlreq_gs, urllib.parse as _urlparse_gs
-        import re as _re_gs, asyncio as _aio_gs
-        _GS_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-
-        def _gs_search(_q):
-            _u = ("https://www.startpage.com/search?q="
-                  + _urlparse_gs.quote_plus(_q) + "&language=en")
-            _req = _urlreq_gs.Request(_u, headers={
-                "User-Agent": _GS_UA,
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "en-US,en;q=0.9",
-            })
-            with _urlreq_gs.urlopen(_req, timeout=12) as _r:
-                return _r.read().decode("utf-8", errors="ignore")
-
-        # Normalizeaza numele echipei (fmscout foloseste alte forme pt nationale)
-        _NT_AL_GS = {
-            "czech republic": "czechia", "republic of ireland": "ireland",
-            "united states": "usa", "south korea": "korea",
-            "ivory coast": "cote d'ivoire", "bosnia and herzegovina": "bosnia",
-            "north macedonia": "north macedonia", "dr congo": "congo dr",
-            "cape verde": "cape verde islands",
-        }
-        _t = (team_name or "").strip()
-        # Scoate sufixul de tara din numele clubului: "Santos (Bra)" → "Santos"
-        _t = _re_gs.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', _t).strip()
-        _t = _NT_AL_GS.get(_t.lower(), _t)
-
-        # Queries DOAR cu echipa — fara echipa riscam sa gasim alt jucator cu acelasi nume
-        # Daca echipa nu e pe fmscout (ex: Recoleta), nu gasim nimic → fallback la Flashscore
-        _gs_queries = []
-        if _t:
-            _gs_queries.append(f"{clean} {_t} fmscout")
-            if clean_no_init and clean_no_init != clean:
-                _gs_queries.append(f"{clean_no_init} {_t} fmscout")
-
-        _fm_id = None
-        for _gs_q in _gs_queries:
-            _gs_html = await _aio_gs.to_thread(_gs_search, _gs_q)
-            _fm_ids_found = _re_gs.findall(r'fmscout\.com/player/(\d+)/', _gs_html)
-            if _fm_ids_found:
-                _fm_id = _fm_ids_found[0]
-                break
-        if _fm_id:
-            # Sortitoutsi CDN: 250x250px, foto real cutout (mai bun decat GeniScout 180x180)
-            _soti_url = f"https://sortitoutsi.b-cdn.net/uploads/face/face_{_fm_id}.png"
-            _gs_url   = f"https://www.geniescout.com/scope/{_fm_id}.png"  # fallback
-
-            def _soti_dl():
-                _req = _urlreq_gs.Request(_soti_url, headers={
-                    "User-Agent": _GS_UA,
-                    "Referer": "https://sortitoutsi.net/",
-                })
-                with _urlreq_gs.urlopen(_req, timeout=8) as _r:
-                    return _r.read()
-
-            _soti_bytes = await _aio_gs.to_thread(_soti_dl)
-            if _soti_bytes and len(_soti_bytes) > 1000:
-                print(f"[sortitoutsi FM:{_fm_id}]", end=" ", flush=True)
-                return _soti_bytes, "", "sortitoutsi", ""
-            
-            # Fallback la GeniScout daca sortitoutsi nu are poza
-            def _gs_dl():
-                _req = _urlreq_gs.Request(_gs_url, headers={
-                    "User-Agent": _GS_UA,
-                    "Referer": "https://www.geniescout.com/",
-                })
-                with _urlreq_gs.urlopen(_req, timeout=8) as _r:
-                    return _r.read()
-
-            _gs_bytes = await _aio_gs.to_thread(_gs_dl)
-            if _gs_bytes and len(_gs_bytes) > 1000:
-                print(f"[geniescout FM:{_fm_id}]", end=" ", flush=True)
-                return _gs_bytes, "", "geniescout", ""
-            else:
-                print(f"[sortitoutsi+geniescout:{_fm_id} no photo]", end=" ", flush=True)
-        else:
-            print(f"[geniescout: not found]", end=" ", flush=True)
-    except Exception as _gs_exc:
-        print(f"[geniescout exc: {_gs_exc}]", end=" ", flush=True)
-
-    # ── 0.7. Sofascore — search by name+team, acoperire universala ──
-    # Fallback dupa sortitoutsi (cand echipa nu e pe fmscout).
-    # Necesita ctx (Playwright context) cu sesiune activa sofascore.com.
+    # ── 1. Sofascore — sursa primara, acoperire universala ───────────
     if ss_ctx:
         try:
-            import re as _re_ss, asyncio as _aio_ss, io as _io_ss
-            import urllib.parse as _up_ss
+            import urllib.parse as _up_ss, io as _io_ss
             from PIL import Image as _PILss
+            from collections import deque as _dq_ss
 
-            _ss_hdrs = {
-                "Referer": "https://www.sofascore.com/",
-                "Accept": "application/json",
-            }
-            # Normalizeaza team name: strip "(Bra)" etc.
+            _ss_hdrs = {"Referer": "https://www.sofascore.com/", "Accept": "application/json"}
+            # Normalizeaza team name: strip "(Bra)" / "(Par)" etc.
             _ss_team = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', team_name or '').strip()
-            _ss_q = _up_ss.quote_plus(clean_no_init or clean)
+            _ss_q    = _up_ss.quote_plus(clean_no_init or clean)
 
             _ss_r = await ss_ctx.request.get(
                 f"https://api.sofascore.com/api/v1/search/all?q={_ss_q}",
                 headers=_ss_hdrs
             )
-            _ss_j = await _ss_r.json() if _ss_r.status == 200 else {}
-            _ss_results = _ss_j.get("results", [])
+            _ss_results = (await _ss_r.json()).get("results", []) if _ss_r.status == 200 else []
 
             # Filtreaza: fotbal + potrivire echipa
             _ss_match = None
-            for _ss_res in _ss_results:
-                _ss_e = _ss_res.get("entity", {})
-                _ss_sport = _ss_e.get("team", {}).get("sport", {}).get("slug", "")
-                _ss_tname = _ss_e.get("team", {}).get("name", "")
-                if _ss_sport != "football":
+            for _res in _ss_results:
+                _e = _res.get("entity", {})
+                if _e.get("team", {}).get("sport", {}).get("slug") != "football":
                     continue
-                # Verifica daca echipa se potriveste
-                _ss_team_ok = (
-                    _ss_team.lower() in _ss_tname.lower() or
-                    _ss_tname.lower() in _ss_team.lower() or
-                    _norm(_ss_team) == _norm(_ss_tname.split()[0])  # primul cuvant
-                ) if _ss_team else False
-                if _ss_team_ok:
-                    _ss_match = _ss_e
+                _t = _e.get("team", {}).get("name", "")
+                if _ss_team and (_ss_team.lower() in _t.lower() or _t.lower() in _ss_team.lower()):
+                    _ss_match = _e
                     break
-            # Fallback: primul rezultat de fotbal daca echipa nu se potriveste
-            if not _ss_match and _ss_results:
-                for _ss_res in _ss_results:
-                    _ss_e = _ss_res.get("entity", {})
-                    if _ss_e.get("team", {}).get("sport", {}).get("slug") == "football":
-                        _ss_match = _ss_e
+            if not _ss_match:  # fallback: primul rezultat de fotbal
+                for _res in _ss_results:
+                    _e = _res.get("entity", {})
+                    if _e.get("team", {}).get("sport", {}).get("slug") == "football":
+                        _ss_match = _e
                         break
 
             if _ss_match:
-                _ss_pid = _ss_match["id"]
-                _ss_found_team = _ss_match.get("team", {}).get("name", "?")
-                _ss_img_r = await ss_ctx.request.get(
+                _ss_pid        = _ss_match["id"]
+                _ss_team_found = _ss_match.get("team", {}).get("name", "?")
+                _img_r = await ss_ctx.request.get(
                     f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image",
                     headers={"Referer": "https://www.sofascore.com/"}
                 )
-                _ss_body = await _ss_img_r.body()
-                if _ss_img_r.status == 200 and len(_ss_body) > 500:
+                _body = await _img_r.body()
+                if _img_r.status == 200 and len(_body) > 500:
                     # Elimina fundalul alb cu flood-fill de la colturi
                     try:
-                        _ss_pil = _PILss.open(_io_ss.BytesIO(_ss_body)).convert("RGBA")
-                        _ss_w, _ss_h = _ss_pil.size
-                        _ss_px = _ss_pil.load()
-
-                        def _ss_near_white(x, y):
-                            r, g, b, a = _ss_px[x, y]
-                            return r > 230 and g > 230 and b > 230 and a > 100
-
-                        from collections import deque as _deque
-                        _ss_q = _deque([(0,0), (_ss_w-1,0), (0,_ss_h-1), (_ss_w-1,_ss_h-1)])
-                        _ss_seen = set()
-                        while _ss_q:
-                            _sx, _sy = _ss_q.popleft()
-                            if (_sx, _sy) in _ss_seen:
+                        _pil  = _PILss.open(_io_ss.BytesIO(_body)).convert("RGBA")
+                        _w, _h = _pil.size
+                        _px   = _pil.load()
+                        _q    = _dq_ss([(0,0),(_w-1,0),(0,_h-1),(_w-1,_h-1)])
+                        _seen = set()
+                        while _q:
+                            _x, _y = _q.popleft()
+                            if (_x,_y) in _seen or not (0<=_x<_w and 0<=_y<_h):
                                 continue
-                            _ss_seen.add((_sx, _sy))
-                            if not (0 <= _sx < _ss_w and 0 <= _sy < _ss_h):
-                                continue
-                            if _ss_near_white(_sx, _sy):
-                                _ss_px[_sx, _sy] = (255, 255, 255, 0)
-                                for _dx, _dy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(-1,1),(1,1)]:
-                                    _nx, _ny = _sx+_dx, _sy+_dy
-                                    if (_nx, _ny) not in _ss_seen:
-                                        _ss_q.append((_nx, _ny))
-
-                        _ss_buf = _io_ss.BytesIO()
-                        _ss_pil.save(_ss_buf, format="PNG")
-                        _ss_body = _ss_buf.getvalue()
-                        print(f"[sofascore id:{_ss_pid} team:{_ss_found_team}]", end=" ", flush=True)
-                        return _ss_body, "", "sofascore", ""
-                    except Exception as _ss_bg_exc:
-                        # Returneaza cu fundal alb daca bg-removal esueaza
-                        print(f"[sofascore id:{_ss_pid} no-bg-removal]", end=" ", flush=True)
-                        return _ss_body, "", "sofascore", ""
+                            _seen.add((_x,_y))
+                            _r2,_g2,_b2,_a2 = _px[_x,_y]
+                            if _r2>230 and _g2>230 and _b2>230 and _a2>100:
+                                _px[_x,_y] = (255,255,255,0)
+                                for _dx,_dy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(-1,1),(1,1)]:
+                                    _q.append((_x+_dx,_y+_dy))
+                        _buf = _io_ss.BytesIO()
+                        _pil.save(_buf, format="PNG")
+                        _body = _buf.getvalue()
+                    except Exception:
+                        pass
+                    print(f"[sofascore {_ss_team_found}]", end=" ", flush=True)
+                    return _body, "", "sofascore", ""
                 else:
-                    print(f"[sofascore: no image {_ss_img_r.status}]", end=" ", flush=True)
+                    print(f"[sofascore: no image]", end=" ", flush=True)
             else:
                 print(f"[sofascore: not found]", end=" ", flush=True)
         except Exception as _ss_exc:
             print(f"[sofascore exc: {_ss_exc}]", end=" ", flush=True)
 
-    # ── 0. Override manual — verifica sofifa_overrides.json ──────
-    if overrides:
-        override_url = None
-        for fs_name, sofifa_url in overrides.items():
-            if _norm(fs_name) == _norm(clean) or _norm(fs_name) == _norm(clean_no_init):
-                override_url = sofifa_url
-                break
-        if override_url:
-            print(f"[override] ", end=" ", flush=True)
-            try:
-                await safe_goto(page, override_url, timeout=35000)
-                await _wait_past_cloudflare(page)
-                # Scroll complet ca sa triggeram lazy-loading
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(800)
-                await page.evaluate("window.scrollTo(0, 0)")
-
-                pg = await page.evaluate("""(matchType) => {
-                    let photoUrl = '';
-                    for (const img of document.querySelectorAll('img')) {
-                        // Cauta in src, data-src si srcset (lazy loading SoFIFA)
-                        const candidates = [
-                            img.src || '',
-                            img.getAttribute('data-src') || '',
-                            img.getAttribute('src') || '',
-                            (img.getAttribute('srcset') || '').split(',')[0].trim().split(' ')[0]
-                        ];
-                        for (const src of candidates) {
-                            const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
-                            if (m && parseInt(m[1]) > 0) {
-                                photoUrl = src.replace('_120.png','_240.png')
-                                              .replace('_60.png','_240.png');
-                                break;
-                            }
-                        }
-                        if (photoUrl) break;
-                    }
-                    let kit = '';
-                    const body = document.body.innerText;
-                    // Match "Kit Number" with optional Club/National qualifier, any separator
-                    const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
-                    const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
-                    // Flexible fallback: "Kit Number" then any non-digit chars then the number
-                    const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
-                    if (matchType === 'national') {
-                        if (mNat) kit = mNat[1];
-                        else if (mClub) kit = mClub[1];
-                        else if (mAny) kit = mAny[1];
-                    } else {
-                        if (mClub) kit = mClub[1];
-                        else if (mAny && !mNat) kit = mAny[1];
-                        else if (mNat) kit = mNat[1];
-                    }
-                    // Extract SoFIFA team ID from the club link (for team verification)
-                    let clubTeamId = 0;
-                    const clubLink = document.querySelector('a[href*="/team/"]');
-                    if (clubLink) {
-                        const parts = clubLink.href.split('/team/');
-                        if (parts.length > 1) clubTeamId = parseInt(parts[1]) || 0;
-                    }
-                    return { photoUrl, kit, clubTeamId };
-                }""", match_type) or {}
-
-                kit = pg.get('kit', '')
-                photo_url = pg.get('photoUrl', '')
-                print(f"photo={'YES' if photo_url else 'NO'} kit={kit or '?'}", end=" ", flush=True)
-
-                if photo_url:
-                    # Incearca toate marimile disponibile pe CDN sofifa
-                    base_url = re.sub(r'_\d+\.png$', '', photo_url)
-                    for size in ["_240.png", "_120.png", "_60.png", ".png"]:
-                        try_url = base_url + size
-                        try:
-                            r = await client.get(try_url, headers=hdrs,
-                                                 timeout=15, follow_redirects=True)
-                            if r.status_code == 200 and len(r.content) > 300:
-                                return r.content, kit, "override", override_url
-                        except Exception:
-                            pass
-                    print(f"[404 all sizes]", end=" ")
-                else:
-                    print(f"[photo not found on override page]", end=" ")
-            except Exception as e:
-                print(f"[override err: {e}]", end=" ")
-
-    # ── 1. Potrivire nume in roster ───────────────────────────
-    best, best_score = None, 0.0
-    for player in roster:
-        score = max(
-            _name_match(clean, player['name']),
-            _name_match(clean_no_init, player['name']) if clean_no_init != clean else 0
-        )
-        if score > best_score:
-            best_score, best = score, player
-
-    # ── 2. Descarca foto din thumbnail (fara page visit) ─────
-    kit        = ''
-    photo_raw  = None
-    photo_src  = None
-    if best and best_score >= 0.3:
-        kit = best.get('kit', '')
-        if best.get('photoUrl'):
-            try:
-                r = await client.get(
-                    best['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
-                )
-                if r.status_code == 200 and len(r.content) > 300:
-                    photo_raw = r.content
-                    photo_src = f"roster(score={best_score:.1f})"
-            except Exception:
-                pass
-
-        # ── 3. Pagina jucatorului:
-        #   - INTOTDEAUNA pt rezerve (kit sigur de pe player page)
-        #   - Fallback pt titulari daca thumbnail invalid
-        #   - INTOTDEAUNA pt national (kit national de pe player page)
-        need_page = is_sub or photo_raw is None or match_type == "national"
-        if need_page and best.get('playerUrl'):
-            try:
-                await safe_goto(page, best['playerUrl'], timeout=35000)
-                await _wait_past_cloudflare(page)
-                # Scroll complet pentru lazy-loading (kit number + poze)
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(800)
-                await page.evaluate("window.scrollTo(0, 0)")
-                pg = await page.evaluate("""(matchType) => {
-                    let photoUrl = '';
-                    for (const img of document.querySelectorAll('img')) {
-                        const candidates = [
-                            img.src || '',
-                            img.getAttribute('data-src') || '',
-                            img.getAttribute('src') || ''
-                        ];
-                        for (const src of candidates) {
-                            const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
-                            if (m && parseInt(m[1]) > 0) {
-                                photoUrl = src.replace('_120.png','_240.png')
-                                              .replace('_60.png','_240.png');
-                                break;
-                            }
-                        }
-                        if (photoUrl) break;
-                    }
-                    let kit = '';
-                    const body = document.body.innerText;
-                    // Match "Kit Number" with optional Club/National qualifier, any separator
-                    const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
-                    const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
-                    // Flexible fallback: "Kit Number" then any non-digit chars then the number
-                    const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
-                    if (matchType === 'national') {
-                        if (mNat) kit = mNat[1];
-                        else if (mClub) kit = mClub[1];
-                        else if (mAny) kit = mAny[1];
-                    } else {
-                        if (mClub) kit = mClub[1];
-                        else if (mAny && !mNat) kit = mAny[1];
-                        else if (mNat) kit = mNat[1];
-                    }
-                    // Extract SoFIFA team ID from the club link (for team verification)
-                    let clubTeamId = 0;
-                    const clubLink = document.querySelector('a[href*="/team/"]');
-                    if (clubLink) {
-                        const parts = clubLink.href.split('/team/');
-                        if (parts.length > 1) clubTeamId = parseInt(parts[1]) || 0;
-                    }
-                    return { photoUrl, kit, clubTeamId };
-                }""", match_type) or {}
-                # Kit de pe player page are prioritate (mai sigur decat roster table)
-                if pg.get('kit'):
-                    kit = pg['kit']
-                # Foto de pe player page — folosita doar daca thumbnail a esuat
-                if photo_raw is None and pg.get('photoUrl'):
-                    r = await client.get(
-                        pg['photoUrl'], headers=hdrs, timeout=15, follow_redirects=True
-                    )
-                    if r.status_code == 200 and len(r.content) > 300:
-                        photo_raw = r.content
-                        photo_src = f"player_page(score={best_score:.1f})"
-            except Exception as e:
-                print(f"\n        [player page exc] {e}")
-
-        if photo_raw is not None:
-            return photo_raw, kit, photo_src, best.get('playerUrl', '')
-
-    # ── 4. DuckDuckGo search → SoFIFA player URL ─────────────────
-    # Gaseste si jucatori "customized" pe care sofifa.com/players nu ii indexeaza
-    if not photo_raw:
-        import urllib.request as _urlreq
-        import urllib.parse  as _urlparse
-        import re            as _re4
-
-        # Alias-uri echipe nationale pentru search engines (SoFIFA indexeaza altfel decat Flashscore)
-        _SEARCH_NT_ALIASES = {
-            "czech republic": "czechia", "republic of ireland": "ireland",
-            "united states": "usa", "south korea": "korea", "north korea": "north korea",
-            "ivory coast": "cote d'ivoire", "cape verde": "cape verde islands",
-            "dr congo": "congo dr", "trinidad and tobago": "trinidad",
-            "bosnia and herzegovina": "bosnia", "north macedonia": "north macedonia",
-        }
-        _team_hint4 = team_name.strip() if team_name else ""
-        _team_hint4 = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', _team_hint4).strip()
-        _team_hint4 = _SEARCH_NT_ALIASES.get(_team_hint4.lower(), _team_hint4)
-        _ddg_query  = f"{clean} {_team_hint4} sofifa".strip() if _team_hint4 else f"{clean} sofifa"
-        print(f"\n        [ddg] {_ddg_query}...", end=" ", flush=True)
-
-        _PHOTO_JS = """(matchType) => {
-            let photoUrl = '';
-            for (const img of document.querySelectorAll('img')) {
-                const candidates = [img.src||'', img.getAttribute('data-src')||'', img.getAttribute('src')||''];
-                for (const src of candidates) {
-                    const m = src.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
-                    if (m && parseInt(m[1]) > 0) {
-                        photoUrl = src.replace('_120.png','_240.png').replace('_60.png','_240.png');
-                        break;
-                    }
-                }
-                if (photoUrl) break;
-            }
-            let kit = '';
-            const body = document.body.innerText;
-            const mClub = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?Club[^0-9]{0,15}?(\\d{1,3})/i);
-            const mNat  = body.match(/Kit[\\s\\u00B7]*Number[\\s\\S]{0,40}?National[^0-9]{0,15}?(\\d{1,3})/i);
-            const mAny  = body.match(/Kit[\\s\\u00B7]*Number[^0-9\\n]{0,30}?(\\d{1,3})/i);
-            if (matchType === 'national') {
-                if (mNat) kit = mNat[1];
-                else if (mClub) kit = mClub[1];
-                else if (mAny) kit = mAny[1];
-            } else {
-                if (mClub) kit = mClub[1];
-                else if (mAny && !mNat) kit = mAny[1];
-                else if (mNat) kit = mNat[1];
-            }
-            const canonical = document.querySelector('link[rel="canonical"]');
-            return { photoUrl, kit, playerUrl: canonical ? canonical.href : window.location.href };
-        }"""
-
-        _ddg_player_url = None
-        try:
-            _ddg_ua  = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-            _ddg_url = ("https://html.duckduckgo.com/html/?q="
-                        + _urlparse.quote_plus(_ddg_query))
-            _ddg_req = _urlreq.Request(
-                _ddg_url,
-                headers={"User-Agent": _ddg_ua, "Accept-Language": "en-US,en;q=0.9"}
-            )
-            with _urlreq.urlopen(_ddg_req, timeout=12) as _ddg_r:
-                _ddg_html = _ddg_r.read().decode("utf-8", errors="ignore")
-            # DDG wraps external links in uddg=URL_ENCODED_TARGET
-            _uddg_hits = _re4.findall(r'uddg=([^&"#\s]+)', _ddg_html)
-            for _enc in _uddg_hits:
-                _dec = _urlparse.unquote(_enc)
-                if "sofifa.com/player/" in _dec:
-                    _ddg_player_url = _dec.split("?")[0].rstrip('/')
-                    break
-        except Exception as _e4:
-            print(f"[ddg exc: {_e4}]", end=" ", flush=True)
-
-        if _ddg_player_url:
-            print(f"found → {_ddg_player_url}", end=" ", flush=True)
-            _ddg_cu = _re4.sub(r'/\d+$', '/customized', _ddg_player_url)
-            _ddg_try_urls = [_ddg_player_url] + ([_ddg_cu] if _ddg_cu != _ddg_player_url else [])
-            # Incearca CDN direct (fara a vizita pagina HTML → evita complet Cloudflare)
-            _m_pid4 = _re4.search(r'/player/(\d+)/', _ddg_player_url)
-            if _m_pid4:
-                for _cdn_u4 in _player_cdn_urls(_m_pid4.group(1)):
-                    try:
-                        _cdn_r4 = await client.get(_cdn_u4, headers=hdrs, timeout=8, follow_redirects=True)
-                        if _cdn_r4.status_code == 200 and len(_cdn_r4.content) > 300:
-                            return _cdn_r4.content, kit, "cdn_direct", _ddg_player_url
-                    except Exception:
-                        pass
-            # Incerca urllib.request direct (trece Cloudflare, httpx e blocat)
-            import asyncio as _aio4, urllib.request as _ur4
-            for _ddg_try in _ddg_try_urls:
-                try:
-                    def _ddg_fetch(_u=_ddg_try):
-                        _req = _ur4.Request(_u, headers={"User-Agent": _ddg_ua, "Accept-Language": "en-US,en;q=0.9"})
-                        with _ur4.urlopen(_req, timeout=15) as _rr:
-                            return _rr.read().decode("utf-8", errors="ignore")
-                    _hx4_html = await _aio4.to_thread(_ddg_fetch)
-                    if "just a moment" in _hx4_html[:2000].lower():
-                        continue  # Cloudflare challenge — skip la Playwright fallback
-                    _hx4_imgs = _re4.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx4_html)
-                    if _hx4_imgs:
-                        _rh4 = await client.get(_hx4_imgs[0], headers=hdrs, timeout=10, follow_redirects=True)
-                        if _rh4.status_code == 200 and len(_rh4.content) > 300:
-                            return _rh4.content, kit, "ddg_search", _ddg_try
-                except Exception:
-                    pass
-            # Fallback: navigare Playwright
-            try:
-                for _ddg_try in _ddg_try_urls:
-                    await safe_goto(page, _ddg_try, timeout=35000)
-                    await _wait_past_cloudflare(page)
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await page.wait_for_timeout(800)
-                    await page.evaluate("window.scrollTo(0, 0)")
-                    _pg4 = await page.evaluate(_PHOTO_JS, match_type) or {}
-                    if _pg4.get("kit"):
-                        kit = _pg4["kit"]
-                    if _pg4.get("photoUrl"):
-                        _r4 = await client.get(
-                            _pg4["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
-                        )
-                        if _r4.status_code == 200 and len(_r4.content) > 300:
-                            return _r4.content, kit, "ddg_search", _pg4.get("playerUrl", _ddg_try)
-            except Exception as _e4b:
-                print(f"[ddg nav exc: {_e4b}]", end=" ", flush=True)
-        else:
-            print(f"[not found]", end=" ", flush=True)
-
-    # ── 5. Startpage/httpx — fallback rapid daca DDG e rate-limited ─
-    if not photo_raw:
-        import urllib.parse as _up5
-        import re          as _re5
-        _NT_AL5 = {"czech republic":"czechia","republic of ireland":"ireland","united states":"usa",
-                   "south korea":"korea","ivory coast":"cote d'ivoire","bosnia and herzegovina":"bosnia",
-                   "north macedonia":"north macedonia","dr congo":"congo dr","cape verde":"cape verde islands"}
-        _team_hint5  = team_name.strip() if team_name else ""
-        _team_hint5  = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', _team_hint5).strip()
-        _team_hint5  = _NT_AL5.get(_team_hint5.lower(), _team_hint5)
-        _q5          = f"{clean} {_team_hint5} sofifa".strip() if _team_hint5 else f"{clean} sofifa"
-        _SP_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-        print(f"\n        [startpage] {_q5}...", end=" ", flush=True)
-        try:
-            _sp_r = await client.get(
-                f"https://www.startpage.com/search?q={_up5.quote_plus(_q5)}&language=english",
-                timeout=15, follow_redirects=True,
-                headers={"User-Agent": _SP_UA, "Accept-Language": "en-US,en;q=0.9",
-                         "Accept": "text/html,application/xhtml+xml"}
-            )
-            _sp_hits = _re5.findall(r'https?://sofifa\.com/player/[a-zA-Z0-9/_-]+', _sp_r.text)
-            if _sp_hits:
-                _sp_url = _sp_hits[0].split('?')[0].rstrip('/')
-                _sp_cu  = _re5.sub(r'/\d+$', '/customized', _sp_url)
-                _sp_try_urls = [_sp_url] + ([_sp_cu] if _sp_cu != _sp_url else [])
-                print(f"found → {_sp_url}", end=" ", flush=True)
-                # Incearca CDN direct (fara a vizita pagina HTML → evita complet Cloudflare)
-                _m_pid5 = _re5.search(r'/player/(\d+)/', _sp_url)
-                if _m_pid5:
-                    for _cdn_u5 in _player_cdn_urls(_m_pid5.group(1)):
-                        try:
-                            _cdn_r5 = await client.get(_cdn_u5, headers=hdrs, timeout=8, follow_redirects=True)
-                            if _cdn_r5.status_code == 200 and len(_cdn_r5.content) > 300:
-                                return _cdn_r5.content, kit, "cdn_direct", _sp_url
-                        except Exception:
-                            pass
-                # Incerca urllib.request direct (trece Cloudflare, httpx e blocat)
-                import asyncio as _aio5, urllib.request as _ur5
-                for _sp_try in _sp_try_urls:
-                    try:
-                        def _sp_fetch(_u=_sp_try):
-                            _req = _ur5.Request(_u, headers={"User-Agent": _SP_UA, "Accept-Language": "en-US,en;q=0.9"})
-                            with _ur5.urlopen(_req, timeout=15) as _rr:
-                                return _rr.read().decode("utf-8", errors="ignore")
-                        _hx5_html = await _aio5.to_thread(_sp_fetch)
-                        if "just a moment" in _hx5_html[:2000].lower():
-                            continue  # Cloudflare challenge — skip la Playwright fallback
-                        _hx5_imgs = _re5.findall(r'https?://[^\'" <>]*/players/[^\'" <>]*\.png', _hx5_html)
-                        if _hx5_imgs:
-                            _rh5 = await client.get(_hx5_imgs[0], headers=hdrs, timeout=10, follow_redirects=True)
-                            if _rh5.status_code == 200 and len(_rh5.content) > 300:
-                                return _rh5.content, kit, "startpage", _sp_try
-                    except Exception:
-                        pass
-                # Fallback: navigare Playwright
-                for _sp_try in _sp_try_urls:
-                    await safe_goto(page, _sp_try, timeout=35000)
-                    await _wait_past_cloudflare(page)
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await page.wait_for_timeout(800)
-                    await page.evaluate("window.scrollTo(0, 0)")
-                    _pg5 = await page.evaluate(_PHOTO_JS, match_type) or {}
-                    if _pg5.get("kit"):
-                        kit = _pg5["kit"]
-                    if _pg5.get("photoUrl"):
-                        _r5 = await client.get(
-                            _pg5["photoUrl"], headers=hdrs, timeout=15, follow_redirects=True
-                        )
-                        if _r5.status_code == 200 and len(_r5.content) > 300:
-                            return _r5.content, kit, "startpage", _pg5.get("playerUrl", _sp_try)
-            else:
-                print(f"[no result]", end=" ", flush=True)
-        except Exception as _e5:
-            print(f"[exc: {_e5}]", end=" ", flush=True)
-
-    # ── 6. Flashscore photo — fallback final (img_src din scraping) ─────────────
-    # Flashscore are poze reale pentru TOTI jucatorii, inclusiv echipe obscure
-    # (Iraq, Bolivia, etc.). Acoperire aproape 100% ca ultim resort.
+    # ── 2. Flashscore photo — fallback final (img_src din scraping) ──
     if img_src and img_src.startswith("http"):
         try:
             import urllib.request as _urlreq_fs, asyncio as _aio_fs
@@ -1685,14 +1177,11 @@ async def fetch_from_roster(name: str, roster: list, page,
             _fs_bytes = await _aio_fs.to_thread(_fs_dl)
             if _fs_bytes and len(_fs_bytes) > 1000:
                 print(f"[flashscore photo]", end=" ", flush=True)
-                return _fs_bytes, kit, "flashscore", ""
-            else:
-                print(f"[flashscore photo: empty]", end=" ", flush=True)
+                return _fs_bytes, "", "flashscore", ""
         except Exception as _fs_exc:
             print(f"[flashscore exc: {_fs_exc}]", end=" ", flush=True)
 
-    # Pastreaza kit-ul gasit (din roster / pagina jucatorului) chiar daca poza a esuat
-    return None, kit, None, (best.get('playerUrl', '') if best else '')
+    return None, "", None, ""
 
 def generate_placeholder(name: str, dest: Path) -> bool:
     """
@@ -1813,7 +1302,7 @@ async def download_all_images(data: dict, images_only: bool = False,
     if player_only:
         print(f"\n[2/3] Downloading photo for: {player_only}...")
     else:
-        print(f"\n[2/3] Downloading photos (sortitoutsi → SoFIFA → Flashscore fallback)...")
+        print(f"\n[2/3] Downloading photos (Sofascore → Flashscore fallback)...")
 
     # Incarca overrides manuale (sofifa_overrides.json)
     overrides = _load_overrides()
@@ -1872,18 +1361,9 @@ async def download_all_images(data: dict, images_only: bool = False,
 
             hdrs = {"User-Agent": UA, "Referer": "https://sofifa.com/"}
 
-            # ── 0. Initializeaza sesiunea Sofascore (ctx.request cu cookies reale) ──
-            ss_ctx = None
-            try:
-                _ss_init_page = await ctx.new_page()
-                await _ss_init_page.goto("https://www.sofascore.com/",
-                                         wait_until="domcontentloaded", timeout=15000)
-                await _ss_init_page.wait_for_timeout(1500)
-                await _ss_init_page.close()
-                ss_ctx = ctx
-                print(f"  ✓ Sofascore session ready")
-            except Exception as _ss_init_exc:
-                print(f"  ⚠ Sofascore session failed: {_ss_init_exc}")
+            # ── 0. Sofascore: ctx.request functioneaza direct (TLS fingerprint Chrome) ──
+            # Nu e nevoie sa navigam sofascore.com — ctx.request trece anti-bot fara cookies
+            ss_ctx = ctx
 
             # ── 1. Descarca logo-uri echipe din Flashscore ────────────────
             fs_home_logo = data.get("match", {}).get("home_logo_url", "")

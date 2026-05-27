@@ -1070,12 +1070,81 @@ def _load_overrides() -> dict:
         return {}
 
 
+
+def _ss_norm(name: str) -> str:
+    """Normalizeaza un nume pentru comparare cu lineup Sofascore (lowercase, fara diacritice)."""
+    nfd = unicodedata.normalize('NFD', name or '')
+    no_diac = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+    return re.sub(r'\s+', ' ', no_diac.lower().strip())
+
+
+def _parse_sofascore_event_id(url: str) -> str:
+    """Extrage event ID din URL Sofascore (ex: #id:12345678 sau /event/12345678)."""
+    if not url:
+        return ""
+    # Format 1: https://www.sofascore.com/slug#id:12345678
+    m = re.search(r'#id:?(\d+)', url)
+    if m:
+        return m.group(1)
+    # Format 2: /event/12345678
+    m = re.search(r'/event/(\d+)', url)
+    if m:
+        return m.group(1)
+    return ""
+
+
+async def _fetch_sofascore_lineup(ss_ctx, event_id: str) -> tuple:
+    """
+    Descarca lineup-ul unui meci Sofascore.
+    Returneaza (home_map, away_map) unde fiecare map e {normalized_name: player_id}.
+    """
+    if not event_id:
+        return {}, {}
+    try:
+        _hdrs = {"Referer": "https://www.sofascore.com/", "Accept": "application/json"}
+        _r = await ss_ctx.request.get(
+            f"https://api.sofascore.com/api/v1/event/{event_id}/lineups",
+            headers=_hdrs
+        )
+        if _r.status != 200:
+            print(f"  ⚠ Sofascore lineup: HTTP {_r.status}")
+            return {}, {}
+        _data = await _r.json()
+        
+        def _build_map(side_data):
+            _map = {}
+            for _entry in side_data.get("players", []):
+                _p = _entry.get("player", {})
+                _pid = _p.get("id")
+                if not _pid:
+                    continue
+                for _fname in ["name", "shortName"]:
+                    _n = _p.get(_fname, "")
+                    if _n:
+                        _map[_ss_norm(_n)] = _pid
+                        # Si varianta fara initiala/prenume scurt
+                        _parts = _n.split()
+                        if len(_parts) > 1:
+                            _map[_ss_norm(_parts[-1])] = _pid  # doar prenumele
+                            _map[_ss_norm(' '.join(_parts[:2]))] = _pid
+            return _map
+        
+        home_map = _build_map(_data.get("home", {}))
+        away_map = _build_map(_data.get("away", {}))
+        total = len(set(home_map.values())) + len(set(away_map.values()))
+        print(f"  ✓ Sofascore lineup: {len(set(home_map.values()))} home + {len(set(away_map.values()))} away players")
+        return home_map, away_map
+    except Exception as _e:
+        print(f"  ⚠ Sofascore lineup error: {_e}")
+        return {}, {}
+
+
 async def fetch_from_roster(name: str, roster: list, page,
                              client: httpx.AsyncClient, is_sub: bool = False,
                              overrides: dict = None, match_type: str = "club",
                              flashscore_url: str = "", team_id: int = 0,
                              team_name: str = "", img_src: str = "",
-                             ss_ctx=None):
+                             ss_ctx=None, ss_lineup_map: dict = None):
     """
     Descarca poza jucatorului (sursa primara + fallback).
     Returneaza (photo_bytes, kit_number, source_label, sofifa_url).
@@ -1092,37 +1161,55 @@ async def fetch_from_roster(name: str, roster: list, page,
             from PIL import Image as _PILss
             from collections import deque as _dq_ss
 
-            _ss_hdrs = {"Referer": "https://www.sofascore.com/", "Accept": "application/json"}
-            # Normalizeaza team name: strip "(Bra)" / "(Par)" etc.
-            _ss_team = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', team_name or '').strip()
-            _ss_q    = _up_ss.quote_plus(clean_no_init or clean)
+            # ── 1a. Lineup map exact match (cand e data URL Sofascore) ──
+            _ss_pid = None
+            if ss_lineup_map:
+                for _try_name in [clean_no_init, clean]:
+                    if not _try_name:
+                        continue
+                    _k = _ss_norm(_try_name)
+                    if _k in ss_lineup_map:
+                        _ss_pid = ss_lineup_map[_k]
+                        break
+                    # Incearca si doar ultimul cuvant (prenume)
+                    _parts = _try_name.split()
+                    if len(_parts) > 1:
+                        _k2 = _ss_norm(_parts[-1])
+                        if _k2 in ss_lineup_map:
+                            _ss_pid = ss_lineup_map[_k2]
+                            break
 
-            _ss_r = await ss_ctx.request.get(
-                f"https://api.sofascore.com/api/v1/search/all?q={_ss_q}",
-                headers=_ss_hdrs
-            )
-            _ss_results = (await _ss_r.json()).get("results", []) if _ss_r.status == 200 else []
+            if not _ss_pid:
+                # ── 1b. Search API (cand nu exista lineup map) ──
+                _ss_hdrs = {"Referer": "https://www.sofascore.com/", "Accept": "application/json"}
+                _ss_team = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', team_name or '').strip()
+                _ss_q    = _up_ss.quote_plus(clean_no_init or clean)
 
-            # Filtreaza: fotbal + potrivire echipa
-            _ss_match = None
-            for _res in _ss_results:
-                _e = _res.get("entity", {})
-                if _e.get("team", {}).get("sport", {}).get("slug") != "football":
-                    continue
-                _t = _e.get("team", {}).get("name", "")
-                if _ss_team and (_ss_team.lower() in _t.lower() or _t.lower() in _ss_team.lower()):
-                    _ss_match = _e
-                    break
-            if not _ss_match:  # fallback: primul rezultat de fotbal
+                _ss_r = await ss_ctx.request.get(
+                    f"https://api.sofascore.com/api/v1/search/all?q={_ss_q}",
+                    headers=_ss_hdrs
+                )
+                _ss_results = (await _ss_r.json()).get("results", []) if _ss_r.status == 200 else []
+
+                _ss_match = None
                 for _res in _ss_results:
                     _e = _res.get("entity", {})
-                    if _e.get("team", {}).get("sport", {}).get("slug") == "football":
+                    if _e.get("team", {}).get("sport", {}).get("slug") != "football":
+                        continue
+                    _t = _e.get("team", {}).get("name", "")
+                    if _ss_team and (_ss_team.lower() in _t.lower() or _t.lower() in _ss_team.lower()):
                         _ss_match = _e
                         break
+                if not _ss_match:
+                    for _res in _ss_results:
+                        _e = _res.get("entity", {})
+                        if _e.get("team", {}).get("sport", {}).get("slug") == "football":
+                            _ss_match = _e
+                            break
+                if _ss_match:
+                    _ss_pid = _ss_match["id"]
 
-            if _ss_match:
-                _ss_pid        = _ss_match["id"]
-                _ss_team_found = _ss_match.get("team", {}).get("name", "?")
+            if _ss_pid is not None:
                 _img_r = await ss_ctx.request.get(
                     f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image",
                     headers={"Referer": "https://www.sofascore.com/"}
@@ -1286,7 +1373,7 @@ def save_image(raw: bytes, path: Path) -> bool:
 
 
 async def download_all_images(data: dict, images_only: bool = False,
-                              player_only: str = None):
+                              player_only: str = None, sofascore_url: str = ""):
     """
     player_only: daca e setat, descarca DOAR jucatorul cu acel nume (override rapid).
     """
@@ -1364,6 +1451,14 @@ async def download_all_images(data: dict, images_only: bool = False,
             # ── 0. Photo service: initializare context ──
             ss_ctx = ctx
 
+            # ── 0.1 Lineup exact map (daca e data URL Sofascore) ────
+            home_lineup_map: dict = {}
+            away_lineup_map: dict = {}
+            _ss_event_id = _parse_sofascore_event_id(sofascore_url)
+            if _ss_event_id:
+                print(f"  [Sofascore lineup] Event ID: {_ss_event_id}")
+                home_lineup_map, away_lineup_map = await _fetch_sofascore_lineup(ss_ctx, _ss_event_id)
+
             # ── 1. Descarca logo-uri echipe din Flashscore ────────────────
             fs_home_logo = data.get("match", {}).get("home_logo_url", "")
             fs_away_logo = data.get("match", {}).get("away_logo_url", "")
@@ -1388,10 +1483,10 @@ async def download_all_images(data: dict, images_only: bool = False,
 
             # Roster gol — kit numbers vin din Flashscore (scraped direct)
             groups = [
-                (data["home"]["players"],     "home_player", [], 0, home_team),
-                (data["away"]["players"],     "away_player", [], 0, away_team),
-                (data["home"]["substitutes"], "home_sub",    [], 0, home_team),
-                (data["away"]["substitutes"], "away_sub",    [], 0, away_team),
+                (data["home"]["players"],     "home_player", [], 0, home_team, home_lineup_map),
+                (data["away"]["players"],     "away_player", [], 0, away_team, away_lineup_map),
+                (data["home"]["substitutes"], "home_sub",    [], 0, home_team, home_lineup_map),
+                (data["away"]["substitutes"], "away_sub",    [], 0, away_team, away_lineup_map),
             ]
 
             # ── 3. Per jucator: descarca foto (paralel, max 3 simultan) ────
@@ -1399,7 +1494,7 @@ async def download_all_images(data: dict, images_only: bool = False,
             _dl_sem   = asyncio.Semaphore(3)
             _dl_tasks = []
 
-            for players, prefix, roster, _tid, _tname in groups:
+            for players, prefix, roster, _tid, _tname, _lineup_map in groups:
                 is_sub = prefix.endswith("_sub")
                 for i, p in enumerate(players, 1):
                     name = p.get("name", "").strip()
@@ -1450,6 +1545,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                         "name": name, "p": p, "is_sub": is_sub,
                         "roster": roster, "_tid": _tid, "_tname": _tname,
                         "dest": dest, "file_key": file_key,
+                        "ss_lineup_map": _lineup_map,
                     })
 
             # 3b. Descarca in paralel (max 3 simultan, fiecare task isi creeaza propria pagina)
@@ -1465,6 +1561,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                             team_id=_t["_tid"], team_name=_t["_tname"],
                             img_src=_t["p"].get("img_src", ""),
                             ss_ctx=ss_ctx,
+                            ss_lineup_map=_t.get("ss_lineup_map"),
                         )
                     except BaseException as _e:
                         print(f"\n      ⚠ Crash '{_t['name']}': {type(_e).__name__}: {_e}")
@@ -1546,7 +1643,14 @@ def main():
     if player_only:
         images_only = True  # --player implica --images-only
 
-    args = [a for a in sys.argv[1:] if not a.startswith("--") and a != player_only]
+    # Suporta flag --sofascore-url: URL-ul meciului pe Sofascore (pentru lineup exact)
+    sofascore_url = ""
+    for i, a in enumerate(sys.argv):
+        if a == "--sofascore-url" and i + 1 < len(sys.argv):
+            sofascore_url = sys.argv[i + 1]
+            break
+
+    args = [a for a in sys.argv[1:] if not a.startswith("--") and a != player_only and a != sofascore_url]
 
     if not args and not images_only:
         print("=" * 55)
@@ -1585,9 +1689,10 @@ def main():
             print("\n⚠ No players found. Check flashscore_output/debug.png")
             return
 
-    # 2. Download imagini de pe SoFIFA
+    # 2. Download imagini
     asyncio.run(download_all_images(data, images_only=images_only,
-                                    player_only=player_only))
+                                    player_only=player_only,
+                                    sofascore_url=sofascore_url))
 
     # 3. Curata img_src din data.json final (nu e nevoie in AE)
     for group in [data["home"]["players"], data["away"]["players"],

@@ -176,6 +176,22 @@ class App(_BASE_CLS):
                                    font=(UI, 13))
         self.url_entry.pack(side="left", fill="x", expand=True, ipady=4)
 
+        # ── Sofascore URL (optional) ──────────────────────────────
+        ss_url_frame = ttk.Frame(root, padding=(PAD, PAD_S, PAD, 0))
+        ss_url_frame.pack(fill="x")
+
+        ttk.Label(ss_url_frame, text="Sofascore URL (optional — pentru poze exacte)",
+                  font=(UI, 11), foreground="#6e6e73" if IS_MAC else "#7a8099"
+                  ).pack(anchor="w", pady=(0, 4))
+
+        ss_entry_row = ttk.Frame(ss_url_frame)
+        ss_entry_row.pack(fill="x")
+
+        self.ss_url_var = tk.StringVar()
+        self.ss_url_entry = ttk.Entry(ss_entry_row, textvariable=self.ss_url_var,
+                                      font=(UI, 13))
+        self.ss_url_entry.pack(side="left", fill="x", expand=True, ipady=4)
+
         # ── Match type ────────────────────────────────────────────
         type_row = ttk.Frame(root, padding=(PAD, PAD_S, PAD, 0))
         type_row.pack(fill="x")
@@ -400,6 +416,9 @@ class App(_BASE_CLS):
             cmd.append(url)
         if extra_args:
             cmd.extend(extra_args)
+        ss_url = self.ss_url_var.get().strip() if hasattr(self, 'ss_url_var') else ""
+        if ss_url and script == "run.py" and not extra_args:
+            cmd.extend(["--sofascore-url", ss_url])
 
         label = "Full Run" if (script == "run.py" and not extra_args) else \
                 "Refresh + Poze" if (script == "refresh_stats.py" and extra_args and "--download-missing" in extra_args) else \

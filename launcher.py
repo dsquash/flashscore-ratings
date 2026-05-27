@@ -180,7 +180,7 @@ class App(_BASE_CLS):
         ss_url_frame = ttk.Frame(root, padding=(PAD, PAD_S, PAD, 0))
         ss_url_frame.pack(fill="x")
 
-        ttk.Label(ss_url_frame, text="Sofascore URL (optional — pentru poze exacte)",
+        ttk.Label(ss_url_frame, text="Sofascore link",
                   font=(UI, 11), foreground="#6e6e73" if IS_MAC else "#7a8099"
                   ).pack(anchor="w", pady=(0, 4))
 
@@ -223,7 +223,7 @@ class App(_BASE_CLS):
                                       **self._btn_kw("primary"))
         self.btn_refresh.pack(side="left", padx=(10, 0), ipadx=4, ipady=4)
 
-        self.btn_refresh_full = ttk.Button(primary_row, text="↻  Refresh + Poze",
+        self.btn_refresh_full = ttk.Button(primary_row, text="↻  Refresh + Photos",
                                            command=self._run_refresh_full,
                                            **self._btn_kw("info" if _BOOT else "primary"))
         self.btn_refresh_full.pack(side="left", padx=(10, 0), ipadx=4, ipady=4)
@@ -237,15 +237,7 @@ class App(_BASE_CLS):
                                          **self._btn_kw("secondary-outline" if _BOOT else "secondary"))
         self.btn_redownload.pack(side="left")
 
-        ttk.Button(sec_row, text="📷  Photos",
-                   command=self._open_player_photos,
-                   **self._btn_kw("secondary-outline" if _BOOT else "secondary")
-                   ).pack(side="left", padx=(8, 0))
 
-        ttk.Button(sec_row, text="✏  Overrides",
-                   command=self._open_overrides,
-                   **self._btn_kw("secondary-outline" if _BOOT else "secondary")
-                   ).pack(side="left", padx=(8, 0))
 
         # ── Status bar ────────────────────────────────────────────
         self.status_var = tk.StringVar(value="Ready.")
@@ -295,10 +287,7 @@ class App(_BASE_CLS):
                                        font=(UI, 11), foreground="#f59e0b",
                                        anchor="w")
         self.missing_label.pack(side="left", fill="x", expand=True)
-        ttk.Button(self.missing_frame, text="→ Fill overrides",
-                   command=self._open_overrides_for_missing,
-                   **self._btn_kw("warning-outline" if _BOOT else "secondary")
-                   ).pack(side="left", padx=(8, 0))
+
 
     # ── Helper: bootstyle-aware button kwargs ─────────────────────
     @staticmethod
@@ -421,7 +410,7 @@ class App(_BASE_CLS):
             cmd.extend(["--sofascore-url", ss_url])
 
         label = "Full Run" if (script == "run.py" and not extra_args) else \
-                "Refresh + Poze" if (script == "refresh_stats.py" and extra_args and "--download-missing" in extra_args) else \
+                "Refresh + Photos" if (script == "refresh_stats.py" and extra_args and "--download-missing" in extra_args) else \
                 "Refresh Stats" if script == "refresh_stats.py" else "Re-download"
         self._log(f"\n{'─'*50}\n▶ {label}  [{self.match_type.get()}]\n{'─'*50}\n")
         self.status_var.set(f"Running: {label}...")

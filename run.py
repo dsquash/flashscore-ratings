@@ -1086,7 +1086,7 @@ async def fetch_from_roster(name: str, roster: list, page,
     clean = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
     clean = re.sub(r'\.$', '', clean).strip()
     # Varianta fara initiala: "Martinelli G" → "Martinelli"
-    clean_no_init = re.sub(r'\s+[A-Z]\.?$', '', clean).strip()
+    clean_no_init = re.sub(r'(\s+[A-Z][a-z]{0,2}\.?)+$', '', clean).strip()
 
     hdrs = {"User-Agent": UA, "Referer": "https://sofifa.com/"}
 
@@ -1109,10 +1109,31 @@ async def fetch_from_roster(name: str, roster: list, page,
             with _urlreq_gs.urlopen(_req, timeout=12) as _r:
                 return _r.read().decode("utf-8", errors="ignore")
 
-        # Incearca mai multe variante de query: cu initiala ("Frattesi D.") si fara ("Frattesi")
-        _gs_queries = [f"{clean} fmscout FM26 player"]
+        # Normalizeaza numele echipei (fmscout foloseste alte forme pt nationale)
+        _NT_AL_GS = {
+            "czech republic": "czechia", "republic of ireland": "ireland",
+            "united states": "usa", "south korea": "korea",
+            "ivory coast": "cote d'ivoire", "bosnia and herzegovina": "bosnia",
+            "north macedonia": "north macedonia", "dr congo": "congo dr",
+            "cape verde": "cape verde islands",
+        }
+        _t = (team_name or "").strip()
+        _t = _NT_AL_GS.get(_t.lower(), _t)
+
+        # Queries in ordine de precizie:
+        # 1. "Frattesi D. Italy fmscout"  — cu initiala + echipa (cel mai precis)
+        # 2. "Frattesi Italy fmscout"     — fara initiala + echipa (rezolva ambiguitate)
+        # 3. "Frattesi D. fmscout FM26"   — fara echipa (fallback)
+        # 4. "Frattesi fmscout"           — doar prenume (ultimul resort)
+        _gs_queries = []
+        if _t:
+            _gs_queries.append(f"{clean} {_t} fmscout")
+            if clean_no_init and clean_no_init != clean:
+                _gs_queries.append(f"{clean_no_init} {_t} fmscout")
+        _gs_queries.append(f"{clean} fmscout FM26 player")
         if clean_no_init and clean_no_init != clean:
             _gs_queries.append(f"{clean_no_init} fmscout")
+
         _fm_id = None
         for _gs_q in _gs_queries:
             _gs_html = await _aio_gs.to_thread(_gs_search, _gs_q)

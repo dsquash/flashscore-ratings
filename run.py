@@ -1118,21 +1118,17 @@ async def fetch_from_roster(name: str, roster: list, page,
             "cape verde": "cape verde islands",
         }
         _t = (team_name or "").strip()
+        # Scoate sufixul de tara din numele clubului: "Santos (Bra)" → "Santos"
+        _t = _re_gs.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', _t).strip()
         _t = _NT_AL_GS.get(_t.lower(), _t)
 
-        # Queries in ordine de precizie:
-        # 1. "Frattesi D. Italy fmscout"  — cu initiala + echipa (cel mai precis)
-        # 2. "Frattesi Italy fmscout"     — fara initiala + echipa (rezolva ambiguitate)
-        # 3. "Frattesi D. fmscout FM26"   — fara echipa (fallback)
-        # 4. "Frattesi fmscout"           — doar prenume (ultimul resort)
+        # Queries DOAR cu echipa — fara echipa riscam sa gasim alt jucator cu acelasi nume
+        # Daca echipa nu e pe fmscout (ex: Recoleta), nu gasim nimic → fallback la Flashscore
         _gs_queries = []
         if _t:
             _gs_queries.append(f"{clean} {_t} fmscout")
             if clean_no_init and clean_no_init != clean:
                 _gs_queries.append(f"{clean_no_init} {_t} fmscout")
-        _gs_queries.append(f"{clean} fmscout FM26 player")
-        if clean_no_init and clean_no_init != clean:
-            _gs_queries.append(f"{clean_no_init} fmscout")
 
         _fm_id = None
         for _gs_q in _gs_queries:
@@ -1380,6 +1376,7 @@ async def fetch_from_roster(name: str, roster: list, page,
             "bosnia and herzegovina": "bosnia", "north macedonia": "north macedonia",
         }
         _team_hint4 = team_name.strip() if team_name else ""
+        _team_hint4 = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', _team_hint4).strip()
         _team_hint4 = _SEARCH_NT_ALIASES.get(_team_hint4.lower(), _team_hint4)
         _ddg_query  = f"{clean} {_team_hint4} sofifa".strip() if _team_hint4 else f"{clean} sofifa"
         print(f"\n        [ddg] {_ddg_query}...", end=" ", flush=True)
@@ -1499,6 +1496,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                    "south korea":"korea","ivory coast":"cote d'ivoire","bosnia and herzegovina":"bosnia",
                    "north macedonia":"north macedonia","dr congo":"congo dr","cape verde":"cape verde islands"}
         _team_hint5  = team_name.strip() if team_name else ""
+        _team_hint5  = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', _team_hint5).strip()
         _team_hint5  = _NT_AL5.get(_team_hint5.lower(), _team_hint5)
         _q5          = f"{clean} {_team_hint5} sofifa".strip() if _team_hint5 else f"{clean} sofifa"
         _SP_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "

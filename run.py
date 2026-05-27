@@ -1097,11 +1097,10 @@ async def fetch_from_roster(name: str, roster: list, page,
         import re as _re_gs, asyncio as _aio_gs
         _GS_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-        _gs_query = f"{clean} fmscout FM26 player"
 
-        def _gs_search():
+        def _gs_search(_q):
             _u = ("https://www.startpage.com/search?q="
-                  + _urlparse_gs.quote_plus(_gs_query) + "&language=en")
+                  + _urlparse_gs.quote_plus(_q) + "&language=en")
             _req = _urlreq_gs.Request(_u, headers={
                 "User-Agent": _GS_UA,
                 "Accept": "text/html,application/xhtml+xml",
@@ -1110,10 +1109,18 @@ async def fetch_from_roster(name: str, roster: list, page,
             with _urlreq_gs.urlopen(_req, timeout=12) as _r:
                 return _r.read().decode("utf-8", errors="ignore")
 
-        _gs_html = await _aio_gs.to_thread(_gs_search)
-        _fm_ids = _re_gs.findall(r'fmscout\.com/player/(\d+)/', _gs_html)
-        if _fm_ids:
-            _fm_id = _fm_ids[0]
+        # Incearca mai multe variante de query: cu initiala ("Frattesi D.") si fara ("Frattesi")
+        _gs_queries = [f"{clean} fmscout FM26 player"]
+        if clean_no_init and clean_no_init != clean:
+            _gs_queries.append(f"{clean_no_init} fmscout")
+        _fm_id = None
+        for _gs_q in _gs_queries:
+            _gs_html = await _aio_gs.to_thread(_gs_search, _gs_q)
+            _fm_ids_found = _re_gs.findall(r'fmscout\.com/player/(\d+)/', _gs_html)
+            if _fm_ids_found:
+                _fm_id = _fm_ids_found[0]
+                break
+        if _fm_id:
             # Sortitoutsi CDN: 250x250px, foto real cutout (mai bun decat GeniScout 180x180)
             _soti_url = f"https://sortitoutsi.b-cdn.net/uploads/face/face_{_fm_id}.png"
             _gs_url   = f"https://www.geniescout.com/scope/{_fm_id}.png"  # fallback

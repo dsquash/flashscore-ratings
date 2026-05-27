@@ -192,21 +192,6 @@ class App(_BASE_CLS):
                                       font=(UI, 13))
         self.ss_url_entry.pack(side="left", fill="x", expand=True, ipady=4)
 
-        # ── Match type ────────────────────────────────────────────
-        type_row = ttk.Frame(root, padding=(PAD, PAD_S, PAD, 0))
-        type_row.pack(fill="x")
-
-        ttk.Label(type_row, text="Match type:", font=(UI, 11),
-                  foreground="#6e6e73" if IS_MAC else "#7a8099"
-                  ).pack(side="left", padx=(0, 16))
-        self.match_type = tk.StringVar(value="club")
-        ttk.Radiobutton(type_row, text="Club", variable=self.match_type,
-                        value="club", command=self._on_type_change
-                        ).pack(side="left")
-        ttk.Radiobutton(type_row, text="National team", variable=self.match_type,
-                        value="national", command=self._on_type_change
-                        ).pack(side="left", padx=(16, 0))
-
         ttk.Separator(root).pack(fill="x", padx=PAD, pady=PAD_S)
 
         # ── Primary actions ───────────────────────────────────────
@@ -302,10 +287,6 @@ class App(_BASE_CLS):
         url = read_last_url()
         if url:
             self.url_var.set(url)
-        self.match_type.set(read_match_type())
-
-    def _on_type_change(self):
-        write_match_type(self.match_type.get())
 
     def _paste_url(self):
         try:
@@ -399,7 +380,6 @@ class App(_BASE_CLS):
             self._log("⚠ Please enter the Flashscore URL!\n")
             return
 
-        write_match_type(self.match_type.get())
         cmd = [sys.executable, str(BASE_DIR / script)]
         if url and script == "run.py" and not extra_args:
             cmd.append(url)
@@ -412,7 +392,7 @@ class App(_BASE_CLS):
         label = "Full Run" if (script == "run.py" and not extra_args) else \
                 "Refresh + Photos" if (script == "refresh_stats.py" and extra_args and "--download-missing" in extra_args) else \
                 "Refresh Stats" if script == "refresh_stats.py" else "Re-download"
-        self._log(f"\n{'─'*50}\n▶ {label}  [{self.match_type.get()}]\n{'─'*50}\n")
+        self._log(f"\n{'─'*50}\n▶ {label}\n{'─'*50}\n")
         self.status_var.set(f"Running: {label}...")
         self._set_running(True)
         is_refresh = (script == "refresh_stats.py")
@@ -460,8 +440,7 @@ class App(_BASE_CLS):
     def _run_refresh_full(self): self._run_script("refresh_stats.py", extra_args=["--download-missing"])
 
     def _run_player_download(self, player_name: str):
-        """Descarca poza unui singur jucator (dupa ce s-a setat un override)."""
-        write_match_type(self.match_type.get())
+        """Download photo for a single player."""
         cmd = [sys.executable, str(BASE_DIR / "run.py"), "--player", player_name]
         label = f"Downloading photo: {player_name}"
         self._log(f"\n{'─'*50}\n▶ {label}\n{'─'*50}\n")

@@ -107,8 +107,14 @@ def _verify_file(data: bytes, filename: str) -> bool:
 
 
 def get_remote_version() -> str:
-    data = _fetch_url(f"{RAW_BASE}/version.txt")
-    return data.decode("utf-8").strip()
+    # Use GitHub API (not raw CDN) to avoid stale cache
+    import json as _json, base64 as _b64, urllib.request as _ur
+    api_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/version.txt?ref={BRANCH}"
+    req = _ur.Request(api_url, headers={"Accept": "application/vnd.github.v3+json",
+                                        "User-Agent": "flashscore-ratings-updater"})
+    with _ur.urlopen(req, timeout=10) as r:
+        obj = _json.loads(r.read())
+    return _b64.b64decode(obj["content"]).decode("utf-8").strip()
 
 
 def _version_gt(a: str, b: str) -> bool:

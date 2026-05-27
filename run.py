@@ -562,6 +562,50 @@ def scrape_flashscore(url: str) -> dict:
             return result;
         }""")
 
+        # ── Kit numbers din Flashscore (wcl-participant_ — starters + subs) ──
+        try:
+            _kit_map = page.evaluate("""() => {
+                var res = {home: {}, away: {}};
+                document.querySelectorAll('[class*="wcl-participant_"]').forEach(function(el) {
+                    var numEl = el.querySelector('[class*="wcl-number_"]');
+                    if (!numEl) return;
+                    var number = numEl.innerText.trim();
+                    if (!number || !/^\\d{1,3}$/.test(number)) return;
+                    var name = "";
+                    el.querySelectorAll('[class*="wcl-bold_"]').forEach(function(span) {
+                        var t = span.innerText.trim();
+                        if (!name && t && !/^\\d+\\.?\\d*$/.test(t) && t.length > 2) name = t;
+                    });
+                    if (!name) {
+                        var ot = el.querySelector('[class*="wcl-overflowText_"]');
+                        if (ot) name = ot.innerText.trim();
+                    }
+                    if (!name || name.length < 2) return;
+                    var isAway = el.className.indexOf("rtl") >= 0;
+                    var team = isAway ? "away" : "home";
+                    res[team][name] = number;
+                });
+                return res;
+            }""")
+            # Aplica numerele pe subs (unde e hardcodat "")
+            for _team in ["home", "away"]:
+                _kmap = _kit_map.get(_team, {})
+                for _p in data[_team]["substitutes"]:
+                    if not _p.get("number"):
+                        _p["number"] = _kmap.get(_p["name"], "")
+                # Suplimenteaza starters daca lipseste numarul
+                for _p in data[_team]["players"]:
+                    if not _p.get("number"):
+                        _p["number"] = _kmap.get(_p["name"], "")
+            _total_kits = sum(1 for _t in ["home","away"]
+                              for _p in data[_t]["players"] + data[_t]["substitutes"]
+                              if _p.get("number"))
+            _total_all = sum(len(data[_t]["players"]) + len(data[_t]["substitutes"])
+                             for _t in ["home","away"])
+            print(f"      Kit numbers (Flashscore): {_total_kits}/{_total_all} jucatori")
+        except Exception as _kit_exc:
+            print(f"      [kit numbers exc]: {_kit_exc}")
+
         # Debug: colecteaza toate data-testid-urile din elementele de player
         # (ajuta la identificarea iconului de brace/hat-trick)
         try:
@@ -1041,6 +1085,51 @@ async def fetch_from_roster(name: str, roster: list, page,
     clean_no_init = re.sub(r'\s+[A-Z]\.?$', '', clean).strip()
 
     hdrs = {"User-Agent": UA, "Referer": "https://sofifa.com/"}
+
+    # ── 0.5. GeniScout via Startpage → fmscout ID ─────────────────
+    # Acoperire ~90%+, inclusiv ligi ne-licentiate (Brazilia, America de Sud etc.)
+    try:
+        import urllib.request as _urlreq_gs, urllib.parse as _urlparse_gs
+        import re as _re_gs, asyncio as _aio_gs
+        _GS_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        _gs_query = f"{clean} fmscout FM26 player"
+
+        def _gs_search():
+            _u = ("https://www.startpage.com/search?q="
+                  + _urlparse_gs.quote_plus(_gs_query) + "&language=en")
+            _req = _urlreq_gs.Request(_u, headers={
+                "User-Agent": _GS_UA,
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9",
+            })
+            with _urlreq_gs.urlopen(_req, timeout=12) as _r:
+                return _r.read().decode("utf-8", errors="ignore")
+
+        _gs_html = await _aio_gs.to_thread(_gs_search)
+        _fm_ids = _re_gs.findall(r'fmscout\.com/player/(\d+)/', _gs_html)
+        if _fm_ids:
+            _fm_id = _fm_ids[0]
+            _gs_url = f"https://www.geniescout.com/scope/{_fm_id}.png"
+
+            def _gs_dl():
+                _req = _urlreq_gs.Request(_gs_url, headers={
+                    "User-Agent": _GS_UA,
+                    "Referer": "https://www.geniescout.com/",
+                })
+                with _urlreq_gs.urlopen(_req, timeout=8) as _r:
+                    return _r.read()
+
+            _gs_bytes = await _aio_gs.to_thread(_gs_dl)
+            if _gs_bytes and len(_gs_bytes) > 1000:
+                print(f"[geniescout FM:{_fm_id}]", end=" ", flush=True)
+                return _gs_bytes, "", "geniescout", ""
+            else:
+                print(f"[geniescout:{_fm_id} no photo]", end=" ", flush=True)
+        else:
+            print(f"[geniescout: not found]", end=" ", flush=True)
+    except Exception as _gs_exc:
+        print(f"[geniescout exc: {_gs_exc}]", end=" ", flush=True)
 
     # ── 0. Override manual — verifica sofifa_overrides.json ──────
     if overrides:
@@ -1551,7 +1640,7 @@ async def download_all_images(data: dict, images_only: bool = False,
     if player_only:
         print(f"\n[2/3] Downloading photo for: {player_only}...")
     else:
-        print(f"\n[2/3] Downloading photos + kit numbers (SoFIFA roster per team)...")
+        print(f"\n[2/3] Downloading photos (GeniScout primary, SoFIFA fallback)...")
 
     # Incarca overrides manuale (sofifa_overrides.json)
     overrides = _load_overrides()

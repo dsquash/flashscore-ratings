@@ -216,14 +216,18 @@ def scrape_flashscore(url: str) -> dict:
             function extractLogo(sectionSel) {
                 const section = document.querySelector(sectionSel);
                 if (!section) return "";
-                for (const img of section.querySelectorAll("img")) {
-                    const src = img.src || img.getAttribute("src") || "";
-                    if (src && src.includes("team_logo")) return src;
+                // Selector specific pentru logo echipa (img din link-ul de echipa)
+                const teamLinkImg = section.querySelector(
+                    '[class*="participantLink--team"] img, [class*="participantLogo"] img'
+                );
+                if (teamLinkImg) {
+                    const src = teamLinkImg.src || teamLinkImg.getAttribute("src") || "";
+                    if (src) return src;
                 }
-                // Fallback: orice img cu src valid din sectiune
+                // Fallback: orice img cu src /image/data/ (format Flashscore CDN)
                 for (const img of section.querySelectorAll("img")) {
                     const src = img.src || img.getAttribute("src") || "";
-                    if (src && (src.startsWith("http") || src.startsWith("/"))) return src;
+                    if (src && src.includes("/image/data/")) return src;
                 }
                 return "";
             }
@@ -1110,8 +1114,24 @@ async def fetch_from_roster(name: str, roster: list, page,
         _fm_ids = _re_gs.findall(r'fmscout\.com/player/(\d+)/', _gs_html)
         if _fm_ids:
             _fm_id = _fm_ids[0]
-            _gs_url = f"https://www.geniescout.com/scope/{_fm_id}.png"
+            # Sortitoutsi CDN: 250x250px, foto real cutout (mai bun decat GeniScout 180x180)
+            _soti_url = f"https://sortitoutsi.b-cdn.net/uploads/face/face_{_fm_id}.png"
+            _gs_url   = f"https://www.geniescout.com/scope/{_fm_id}.png"  # fallback
 
+            def _soti_dl():
+                _req = _urlreq_gs.Request(_soti_url, headers={
+                    "User-Agent": _GS_UA,
+                    "Referer": "https://sortitoutsi.net/",
+                })
+                with _urlreq_gs.urlopen(_req, timeout=8) as _r:
+                    return _r.read()
+
+            _soti_bytes = await _aio_gs.to_thread(_soti_dl)
+            if _soti_bytes and len(_soti_bytes) > 1000:
+                print(f"[sortitoutsi FM:{_fm_id}]", end=" ", flush=True)
+                return _soti_bytes, "", "sortitoutsi", ""
+            
+            # Fallback la GeniScout daca sortitoutsi nu are poza
             def _gs_dl():
                 _req = _urlreq_gs.Request(_gs_url, headers={
                     "User-Agent": _GS_UA,
@@ -1125,7 +1145,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                 print(f"[geniescout FM:{_fm_id}]", end=" ", flush=True)
                 return _gs_bytes, "", "geniescout", ""
             else:
-                print(f"[geniescout:{_fm_id} no photo]", end=" ", flush=True)
+                print(f"[sortitoutsi+geniescout:{_fm_id} no photo]", end=" ", flush=True)
         else:
             print(f"[geniescout: not found]", end=" ", flush=True)
     except Exception as _gs_exc:

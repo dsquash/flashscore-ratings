@@ -1077,7 +1077,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                              team_name: str = "", img_src: str = "",
                              ss_ctx=None):
     """
-    Descarca poza jucatorului via Sofascore (primar) + Flashscore (fallback).
+    Descarca poza jucatorului (sursa primara + fallback).
     Returneaza (photo_bytes, kit_number, source_label, sofifa_url).
     """
     clean = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
@@ -1085,7 +1085,7 @@ async def fetch_from_roster(name: str, roster: list, page,
     # Varianta fara initiala: "Martinelli G." → "Martinelli"
     clean_no_init = re.sub(r'(\s+[A-Z][a-z]{0,2}\.?)+$', '', clean).strip()
 
-    # ── 1. Sofascore — sursa primara, acoperire universala ───────────
+    # ── 1. Photo service — sursa primara, acoperire universala ──────
     if ss_ctx:
         try:
             import urllib.parse as _up_ss, io as _io_ss
@@ -1151,14 +1151,14 @@ async def fetch_from_roster(name: str, roster: list, page,
                         _body = _buf.getvalue()
                     except Exception:
                         pass
-                    print(f"[sofascore {_ss_team_found}]", end=" ", flush=True)
-                    return _body, "", "sofascore", ""
+                    print(f"[photo ✓]", end=" ", flush=True)
+                    return _body, "", "photo", ""
                 else:
-                    print(f"[sofascore: no image]", end=" ", flush=True)
+                    print(f"[no image]", end=" ", flush=True)
             else:
-                print(f"[sofascore: not found]", end=" ", flush=True)
+                print(f"[not found]", end=" ", flush=True)
         except Exception as _ss_exc:
-            print(f"[sofascore exc: {_ss_exc}]", end=" ", flush=True)
+            print(f"[exc: {_ss_exc}]", end=" ", flush=True)
 
     # ── 2. Flashscore photo — fallback final (img_src din scraping) ──
     if img_src and img_src.startswith("http"):
@@ -1302,7 +1302,7 @@ async def download_all_images(data: dict, images_only: bool = False,
     if player_only:
         print(f"\n[2/3] Downloading photo for: {player_only}...")
     else:
-        print(f"\n[2/3] Downloading photos (Sofascore → Flashscore fallback)...")
+        print(f"\n[2/3] Downloading photos...")
 
     # Incarca overrides manuale (sofifa_overrides.json)
     overrides = _load_overrides()
@@ -1361,8 +1361,7 @@ async def download_all_images(data: dict, images_only: bool = False,
 
             hdrs = {"User-Agent": UA, "Referer": "https://sofifa.com/"}
 
-            # ── 0. Sofascore: ctx.request functioneaza direct (TLS fingerprint Chrome) ──
-            # Nu e nevoie sa navigam sofascore.com — ctx.request trece anti-bot fara cookies
+            # ── 0. Photo service: initializare context ──
             ss_ctx = ctx
 
             # ── 1. Descarca logo-uri echipe din Flashscore ────────────────

@@ -1772,49 +1772,34 @@ async def download_all_images(data: dict, images_only: bool = False,
 
             hdrs = {"User-Agent": UA, "Referer": "https://sofifa.com/"}
 
-            # ── 1. Incarca roster complet — pagina proaspata per echipa ──
-            print(f"\n  SoFIFA: {home_team}...")
-            sf_page = await ctx.new_page()
-            home_team_id, home_roster, home_logo_url = await get_sofifa_team_roster(
-                home_team, sf_page, match_type=MATCH_TYPE)
-            await sf_page.close()
-
-            print(f"\n  SoFIFA: {away_team}...")
-            sf_page = await ctx.new_page()
-            away_team_id, away_roster, away_logo_url = await get_sofifa_team_roster(
-                away_team, sf_page, match_type=MATCH_TYPE)
-            await sf_page.close()
-
-            # ── 2. Descarca logo-uri echipe ───────────────────────────────
-            # Ordinea de prioritate: Flashscore logo → SoFIFA logo
+            # ── 1. Descarca logo-uri echipe din Flashscore ────────────────
             fs_home_logo = data.get("match", {}).get("home_logo_url", "")
             fs_away_logo = data.get("match", {}).get("away_logo_url", "")
 
-            for logo_urls, filename in [
-                ([fs_home_logo, home_logo_url], "home_logo.png"),
-                ([fs_away_logo, away_logo_url], "away_logo.png"),
+            for logo_url, filename in [
+                (fs_home_logo, "home_logo.png"),
+                (fs_away_logo, "away_logo.png"),
             ]:
-                saved = False
-                for logo_url in logo_urls:
-                    if not logo_url or saved:
-                        continue
-                    try:
-                        r = await client.get(logo_url, headers=hdrs, timeout=15,
-                                             follow_redirects=True)
-                        if r.status_code == 200 and len(r.content) > 100:
-                            (IMAGES_DIR / filename).write_bytes(r.content)
-                            print(f"  ✓ Logo: {filename}")
-                            saved = True
-                    except Exception:
-                        pass
-                if not saved:
+                if not logo_url:
+                    print(f"  ⚠ Logo {filename}: not found")
+                    continue
+                try:
+                    r = await client.get(logo_url, headers=hdrs, timeout=15,
+                                         follow_redirects=True)
+                    if r.status_code == 200 and len(r.content) > 100:
+                        (IMAGES_DIR / filename).write_bytes(r.content)
+                        print(f"  ✓ Logo: {filename}")
+                    else:
+                        print(f"  ⚠ Logo {filename}: not found")
+                except Exception:
                     print(f"  ⚠ Logo {filename}: not found")
 
+            # Roster gol — kit numbers vin din Flashscore (scraped direct)
             groups = [
-                (data["home"]["players"],     "home_player", home_roster, home_team_id, home_team),
-                (data["away"]["players"],     "away_player", away_roster, away_team_id, away_team),
-                (data["home"]["substitutes"], "home_sub",    home_roster, home_team_id, home_team),
-                (data["away"]["substitutes"], "away_sub",    away_roster, away_team_id, away_team),
+                (data["home"]["players"],     "home_player", [], 0, home_team),
+                (data["away"]["players"],     "away_player", [], 0, away_team),
+                (data["home"]["substitutes"], "home_sub",    [], 0, home_team),
+                (data["away"]["substitutes"], "away_sub",    [], 0, away_team),
             ]
 
             # ── 3. Per jucator: descarca foto (paralel, max 3 simultan) ────

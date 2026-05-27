@@ -1074,7 +1074,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                              client: httpx.AsyncClient, is_sub: bool = False,
                              overrides: dict = None, match_type: str = "club",
                              flashscore_url: str = "", team_id: int = 0,
-                             team_name: str = ""):
+                             team_name: str = "", img_src: str = ""):
     """
     Cauta jucatorul in roster-ul pre-incarcat al echipei.
     - is_sub=True: INTOTDEAUNA viziteaza pagina jucatorului pentru kit number
@@ -1566,6 +1566,31 @@ async def fetch_from_roster(name: str, roster: list, page,
         except Exception as _e5:
             print(f"[exc: {_e5}]", end=" ", flush=True)
 
+    # ── 6. Flashscore photo — fallback final (img_src din scraping) ─────────────
+    # Flashscore are poze reale pentru TOTI jucatorii, inclusiv echipe obscure
+    # (Iraq, Bolivia, etc.). Acoperire aproape 100% ca ultim resort.
+    if img_src and img_src.startswith("http"):
+        try:
+            import urllib.request as _urlreq_fs, asyncio as _aio_fs
+            _FS_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            def _fs_dl():
+                _req = _urlreq_fs.Request(img_src, headers={
+                    "User-Agent": _FS_UA,
+                    "Referer": "https://www.flashscore.com/",
+                    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                })
+                with _urlreq_fs.urlopen(_req, timeout=10) as _r:
+                    return _r.read()
+            _fs_bytes = await _aio_fs.to_thread(_fs_dl)
+            if _fs_bytes and len(_fs_bytes) > 1000:
+                print(f"[flashscore photo]", end=" ", flush=True)
+                return _fs_bytes, kit, "flashscore", ""
+            else:
+                print(f"[flashscore photo: empty]", end=" ", flush=True)
+        except Exception as _fs_exc:
+            print(f"[flashscore exc: {_fs_exc}]", end=" ", flush=True)
+
     # Pastreaza kit-ul gasit (din roster / pagina jucatorului) chiar daca poza a esuat
     return None, kit, None, (best.get('playerUrl', '') if best else '')
 
@@ -1688,7 +1713,7 @@ async def download_all_images(data: dict, images_only: bool = False,
     if player_only:
         print(f"\n[2/3] Downloading photo for: {player_only}...")
     else:
-        print(f"\n[2/3] Downloading photos (GeniScout primary, SoFIFA fallback)...")
+        print(f"\n[2/3] Downloading photos (sortitoutsi → SoFIFA → Flashscore fallback)...")
 
     # Incarca overrides manuale (sofifa_overrides.json)
     overrides = _load_overrides()
@@ -1860,7 +1885,8 @@ async def download_all_images(data: dict, images_only: bool = False,
                             is_sub=_t["is_sub"], overrides=overrides,
                             match_type=MATCH_TYPE,
                             flashscore_url=_t["p"].get("flashscore_url", ""),
-                            team_id=_t["_tid"], team_name=_t["_tname"]
+                            team_id=_t["_tid"], team_name=_t["_tname"],
+                            img_src=_t["p"].get("img_src", ""),
                         )
                     except BaseException as _e:
                         print(f"\n      ⚠ Crash '{_t['name']}': {type(_e).__name__}: {_e}")

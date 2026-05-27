@@ -1074,7 +1074,8 @@ async def fetch_from_roster(name: str, roster: list, page,
                              client: httpx.AsyncClient, is_sub: bool = False,
                              overrides: dict = None, match_type: str = "club",
                              flashscore_url: str = "", team_id: int = 0,
-                             team_name: str = "", img_src: str = ""):
+                             team_name: str = "", img_src: str = "",
+                             ss_ctx=None):
     """
     Cauta jucatorul in roster-ul pre-incarcat al echipei.
     - is_sub=True: INTOTDEAUNA viziteaza pagina jucatorului pentru kit number
@@ -1174,6 +1175,107 @@ async def fetch_from_roster(name: str, roster: list, page,
             print(f"[geniescout: not found]", end=" ", flush=True)
     except Exception as _gs_exc:
         print(f"[geniescout exc: {_gs_exc}]", end=" ", flush=True)
+
+    # ── 0.7. Sofascore — search by name+team, acoperire universala ──
+    # Fallback dupa sortitoutsi (cand echipa nu e pe fmscout).
+    # Necesita ctx (Playwright context) cu sesiune activa sofascore.com.
+    if ss_ctx:
+        try:
+            import re as _re_ss, asyncio as _aio_ss, io as _io_ss
+            import urllib.parse as _up_ss
+            from PIL import Image as _PILss
+
+            _ss_hdrs = {
+                "Referer": "https://www.sofascore.com/",
+                "Accept": "application/json",
+            }
+            # Normalizeaza team name: strip "(Bra)" etc.
+            _ss_team = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', team_name or '').strip()
+            _ss_q = _up_ss.quote_plus(clean_no_init or clean)
+
+            _ss_r = await ss_ctx.request.get(
+                f"https://api.sofascore.com/api/v1/search/all?q={_ss_q}",
+                headers=_ss_hdrs
+            )
+            _ss_j = await _ss_r.json() if _ss_r.status == 200 else {}
+            _ss_results = _ss_j.get("results", [])
+
+            # Filtreaza: fotbal + potrivire echipa
+            _ss_match = None
+            for _ss_res in _ss_results:
+                _ss_e = _ss_res.get("entity", {})
+                _ss_sport = _ss_e.get("team", {}).get("sport", {}).get("slug", "")
+                _ss_tname = _ss_e.get("team", {}).get("name", "")
+                if _ss_sport != "football":
+                    continue
+                # Verifica daca echipa se potriveste
+                _ss_team_ok = (
+                    _ss_team.lower() in _ss_tname.lower() or
+                    _ss_tname.lower() in _ss_team.lower() or
+                    _norm(_ss_team) == _norm(_ss_tname.split()[0])  # primul cuvant
+                ) if _ss_team else False
+                if _ss_team_ok:
+                    _ss_match = _ss_e
+                    break
+            # Fallback: primul rezultat de fotbal daca echipa nu se potriveste
+            if not _ss_match and _ss_results:
+                for _ss_res in _ss_results:
+                    _ss_e = _ss_res.get("entity", {})
+                    if _ss_e.get("team", {}).get("sport", {}).get("slug") == "football":
+                        _ss_match = _ss_e
+                        break
+
+            if _ss_match:
+                _ss_pid = _ss_match["id"]
+                _ss_found_team = _ss_match.get("team", {}).get("name", "?")
+                _ss_img_r = await ss_ctx.request.get(
+                    f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image",
+                    headers={"Referer": "https://www.sofascore.com/"}
+                )
+                _ss_body = await _ss_img_r.body()
+                if _ss_img_r.status == 200 and len(_ss_body) > 500:
+                    # Elimina fundalul alb cu flood-fill de la colturi
+                    try:
+                        _ss_pil = _PILss.open(_io_ss.BytesIO(_ss_body)).convert("RGBA")
+                        _ss_w, _ss_h = _ss_pil.size
+                        _ss_px = _ss_pil.load()
+
+                        def _ss_near_white(x, y):
+                            r, g, b, a = _ss_px[x, y]
+                            return r > 230 and g > 230 and b > 230 and a > 100
+
+                        from collections import deque as _deque
+                        _ss_q = _deque([(0,0), (_ss_w-1,0), (0,_ss_h-1), (_ss_w-1,_ss_h-1)])
+                        _ss_seen = set()
+                        while _ss_q:
+                            _sx, _sy = _ss_q.popleft()
+                            if (_sx, _sy) in _ss_seen:
+                                continue
+                            _ss_seen.add((_sx, _sy))
+                            if not (0 <= _sx < _ss_w and 0 <= _sy < _ss_h):
+                                continue
+                            if _ss_near_white(_sx, _sy):
+                                _ss_px[_sx, _sy] = (255, 255, 255, 0)
+                                for _dx, _dy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(-1,1),(1,1)]:
+                                    _nx, _ny = _sx+_dx, _sy+_dy
+                                    if (_nx, _ny) not in _ss_seen:
+                                        _ss_q.append((_nx, _ny))
+
+                        _ss_buf = _io_ss.BytesIO()
+                        _ss_pil.save(_ss_buf, format="PNG")
+                        _ss_body = _ss_buf.getvalue()
+                        print(f"[sofascore id:{_ss_pid} team:{_ss_found_team}]", end=" ", flush=True)
+                        return _ss_body, "", "sofascore", ""
+                    except Exception as _ss_bg_exc:
+                        # Returneaza cu fundal alb daca bg-removal esueaza
+                        print(f"[sofascore id:{_ss_pid} no-bg-removal]", end=" ", flush=True)
+                        return _ss_body, "", "sofascore", ""
+                else:
+                    print(f"[sofascore: no image {_ss_img_r.status}]", end=" ", flush=True)
+            else:
+                print(f"[sofascore: not found]", end=" ", flush=True)
+        except Exception as _ss_exc:
+            print(f"[sofascore exc: {_ss_exc}]", end=" ", flush=True)
 
     # ── 0. Override manual — verifica sofifa_overrides.json ──────
     if overrides:
@@ -1770,6 +1872,19 @@ async def download_all_images(data: dict, images_only: bool = False,
 
             hdrs = {"User-Agent": UA, "Referer": "https://sofifa.com/"}
 
+            # ── 0. Initializeaza sesiunea Sofascore (ctx.request cu cookies reale) ──
+            ss_ctx = None
+            try:
+                _ss_init_page = await ctx.new_page()
+                await _ss_init_page.goto("https://www.sofascore.com/",
+                                         wait_until="domcontentloaded", timeout=15000)
+                await _ss_init_page.wait_for_timeout(1500)
+                await _ss_init_page.close()
+                ss_ctx = ctx
+                print(f"  ✓ Sofascore session ready")
+            except Exception as _ss_init_exc:
+                print(f"  ⚠ Sofascore session failed: {_ss_init_exc}")
+
             # ── 1. Descarca logo-uri echipe din Flashscore ────────────────
             fs_home_logo = data.get("match", {}).get("home_logo_url", "")
             fs_away_logo = data.get("match", {}).get("away_logo_url", "")
@@ -1870,6 +1985,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                             flashscore_url=_t["p"].get("flashscore_url", ""),
                             team_id=_t["_tid"], team_name=_t["_tname"],
                             img_src=_t["p"].get("img_src", ""),
+                            ss_ctx=ss_ctx,
                         )
                     except BaseException as _e:
                         print(f"\n      ⚠ Crash '{_t['name']}': {type(_e).__name__}: {_e}")

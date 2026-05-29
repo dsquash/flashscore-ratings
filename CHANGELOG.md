@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.55
+- Browser: headless=True — browserul nu mai apare vizibil
+
 ## v1.0.54
 - Search: alias-uri echipe naționale pentru DDG & Startpage (ex: "Czech Republic" → "czechia") — îmbunătățește rezultatele pentru meciuri de naționale
 

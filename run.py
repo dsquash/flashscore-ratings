@@ -1411,7 +1411,7 @@ async def download_all_images(data: dict, images_only: bool = False,
     async with async_playwright() as pw:
         try:
             browser = await pw.chromium.launch(
-                headless=False,   # headless e detectat de Cloudflare; headed trece challenge-ul
+                headless=True,    # SoFIFA fetch mutat pe urllib.request; Flashscore merge si headless
                 args=[
                     "--no-sandbox",
                     "--disable-blink-features=AutomationControlled",

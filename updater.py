@@ -102,24 +102,31 @@ def _fetch_url(url: str, timeout: int = 10) -> bytes:
 
 
 def _fetch_file_via_api(filename: str, timeout: int = 30) -> bytes:
-    """Descarca un fisier prin GitHub API (fara cache CDN, mereu proaspat)."""
+    """
+    Descarca un fisier. Incearca intai GitHub API (mereu proaspat), iar daca
+    da fail (ex: rate limit 60/ora pe IP) cade pe raw CDN cu cache-busting.
+    """
     import urllib.request, json as _json, base64 as _b64
     from urllib.parse import quote
-    api_url = (f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
-               f"/contents/{quote(filename)}?ref={BRANCH}")
-    req = urllib.request.Request(api_url, headers={
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "flashscore-ratings-updater",
-    })
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        obj = _json.loads(r.read())
-    # File <1MB: content inline (base64). Larger: fall back to download_url.
-    if obj.get("content"):
-        return _b64.b64decode(obj["content"])
-    dl = obj.get("download_url")
-    if dl:
-        return _fetch_url(dl, timeout=timeout)
-    raise RuntimeError(f"No content for {filename}")
+    # 1) GitHub API (proaspat, dar limitat la 60 cereri/ora neautentificat)
+    try:
+        api_url = (f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
+                   f"/contents/{quote(filename)}?ref={BRANCH}")
+        req = urllib.request.Request(api_url, headers={
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "flashscore-ratings-updater",
+        })
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            obj = _json.loads(r.read())
+        if obj.get("content"):
+            return _b64.b64decode(obj["content"])
+        dl = obj.get("download_url")
+        if dl:
+            return _fetch_url(dl, timeout=timeout)
+    except Exception:
+        pass
+    # 2) Fallback: raw CDN (fara rate limit), cache-busted
+    return _fetch_url(f"{RAW_BASE}/{filename}", timeout=timeout)
 
 
 def _verify_file(data: bytes, filename: str) -> bool:
@@ -136,14 +143,17 @@ def _verify_file(data: bytes, filename: str) -> bool:
 
 
 def get_remote_version() -> str:
-    # Use GitHub API (not raw CDN) to avoid stale cache
+    # GitHub API (fresh, no CDN cache), fallback to cache-busted raw CDN
     import json as _json, base64 as _b64, urllib.request as _ur
-    api_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/version.txt?ref={BRANCH}"
-    req = _ur.Request(api_url, headers={"Accept": "application/vnd.github.v3+json",
-                                        "User-Agent": "flashscore-ratings-updater"})
-    with _ur.urlopen(req, timeout=10) as r:
-        obj = _json.loads(r.read())
-    return _b64.b64decode(obj["content"]).decode("utf-8").strip()
+    try:
+        api_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/version.txt?ref={BRANCH}"
+        req = _ur.Request(api_url, headers={"Accept": "application/vnd.github.v3+json",
+                                            "User-Agent": "flashscore-ratings-updater"})
+        with _ur.urlopen(req, timeout=10) as r:
+            obj = _json.loads(r.read())
+        return _b64.b64decode(obj["content"]).decode("utf-8").strip()
+    except Exception:
+        return _fetch_url(f"{RAW_BASE}/version.txt").decode("utf-8").strip()
 
 
 def _version_gt(a: str, b: str) -> bool:

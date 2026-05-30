@@ -103,16 +103,6 @@
     btnRun.alignment = ["fill", "center"];
     btnRun.preferredSize = [240, 36];
 
-    // ── Buton Refresh Stats ────────────────────────────────────
-    var btnRefreshStats = panel.add("button", undefined, "\u21BB  Refresh Stats");
-    btnRefreshStats.alignment = ["fill", "center"];
-    btnRefreshStats.preferredSize = [240, 30];
-
-    // ── Buton Refresh + Poze ──────────────────────────────────
-    var btnRefreshFull = panel.add("button", undefined, "\u21BB  Refresh + Poze");
-    btnRefreshFull.alignment = ["fill", "center"];
-    btnRefreshFull.preferredSize = [240, 30];
-
     // ── Sectiunea Render ───────────────────────────────────────
     panel.add("panel", undefined, undefined).preferredSize = [240, 2];
 
@@ -336,112 +326,6 @@
             statusTxt.text = "ERROR \u2014 see alert.";
             alert("Error in " + label + ":\n" + msg);
         }
-
-        try { panel.layout.layout(true); } catch(e) {}
-    };
-
-    // ── onClick: Refresh Stats ─────────────────────────────────
-    btnRefreshStats.onClick = function() {
-        var scriptPath  = dir + "/refresh_stats.py";
-        var refreshJsx  = dir + "/refresh_comps.jsx";
-        var summaryPath = dir + "/flashscore_output/last_refresh_summary.txt";
-
-        if (!(new File(scriptPath)).exists) {
-            alert("refresh_stats.py was not found in:\n" + dir);
-            return;
-        }
-
-        // ── Step 1: run Python scraper to update data.json ────────
-        statusTxt.text = "Refreshing stats from Flashscore...";
-        try { panel.layout.layout(true); } catch(e) {}
-
-        // Detect Python interpreter from .python_path (written by INSTALL_MAC.command)
-        var pyBin = "python3";
-        var pyFile = new File(dir + "/.python_path");
-        if (pyFile.exists) {
-            pyFile.open("r");
-            pyBin = pyFile.read().replace(/[\r\n]/g, "");
-            pyFile.close();
-        }
-
-        // Platform-aware execution
-        var isMac = ($.os.toLowerCase().indexOf("mac") >= 0);
-        if (isMac) {
-            // On Mac: use full Python path, quote script path for shell
-            var macCmd = '"' + pyBin + '" "' + scriptPath + '"';
-            system.callSystem(macCmd);
-        } else {
-            // On Windows: use cmd
-            var winPath = scriptPath.replace(/\//g, "\\");
-            system.callSystem('cmd /c python "' + winPath + '" >nul 2>&1');
-        }
-
-        // ── Step 2: read and show summary ─────────────────────────
-        var sf = new File(summaryPath);
-        var summaryText = "";
-        if (sf.exists) {
-            sf.encoding = "UTF-8";
-            sf.open("r");
-            summaryText = sf.read();
-            sf.close();
-        }
-
-        if (summaryText) {
-            alert("REFRESH STATS\n\n" + summaryText);
-        }
-
-        // ── Step 3: update AE compositions ────────────────────────
-        var fJsx = new File(refreshJsx);
-        if (fJsx.exists) {
-            statusTxt.text = "Updating compositions...";
-            try { panel.layout.layout(true); } catch(e) {}
-            try {
-                $.global.__LINEUP_SCRIPTS_DIR__ = dir;
-                $.evalFile(fJsx);
-                statusTxt.text = "Refresh Stats \u2014 done.";
-            } catch(e) {
-                statusTxt.text = "ERROR updating comps \u2014 see alert.";
-                alert("Error in refresh_comps.jsx:\n" + (e.message || String(e)));
-            }
-        } else {
-            statusTxt.text = "Refresh Stats \u2014 done (comps not updated).";
-            alert("refresh_comps.jsx not found.\nStats were updated in data.json but compositions were not refreshed.");
-        }
-
-        try { panel.layout.layout(true); } catch(e) {}
-    };
-
-    // ── onClick: Refresh + Poze ──────────────────────────────
-    btnRefreshFull.onClick = function() {
-        var scriptPath = dir + "/refresh_stats.py";
-
-        if (!(new File(scriptPath)).exists) {
-            alert("refresh_stats.py was not found in:\n" + dir);
-            return;
-        }
-
-        var pyBin = "python3";
-        var pyFile = new File(dir + "/.python_path");
-        if (pyFile.exists) {
-            pyFile.open("r");
-            pyBin = pyFile.read().replace(/[\r\n]/g, "");
-            pyFile.close();
-        }
-
-        var isMac = ($.os.toLowerCase().indexOf("mac") >= 0);
-
-        // Ruleaza in background — altfel AE se blocheaza 2-5 min cat dureaza Playwright
-        if (isMac) {
-            var macCmd = '"' + pyBin + '" "' + scriptPath + '" --download-missing > /dev/null 2>&1 &';
-            system.callSystem("bash -c '" + macCmd + "'");
-        } else {
-            var winPath = scriptPath.replace(/\//g, "\\\\");
-            system.callSystem('cmd /c start /b python "' + winPath + '" --download-missing');
-        }
-
-        statusTxt.text = "\u21BB Download poze pornit...";
-        alert("Download poze pornit in background.\n\nDureaza 2-4 minute (descarca SoFIFA).\nDupa ce termina, apasa:\n  1. \u25B6 Run \u2192 POPULATE\n  2. \u21BB Refresh Stats");
-        statusTxt.text = "Refresh + Poze \u2014 running in background.";
 
         try { panel.layout.layout(true); } catch(e) {}
     };

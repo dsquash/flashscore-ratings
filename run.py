@@ -1549,6 +1549,10 @@ async def download_all_images(data: dict, images_only: bool = False,
                         if _bk and _bs >= 0.3:
                             p["number"] = _bk
 
+                    # Cand e dat URL Sofascore, fortam re-download (sterge poza veche)
+                    if sofascore_url and dest.exists():
+                        dest.unlink(missing_ok=True)
+                        is_placeholder = False
                     if dest.exists() and not is_placeholder and not (images_only and has_override):
                         print(f"  ✓ {name} (cached)")
                         ok += 1
@@ -1679,8 +1683,13 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
+    _ver = ""
+    try:
+        _ver = (BASE_DIR / "version.txt").read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
     print("=" * 55)
-    print("  FLASHSCORE RATINGS — run.py")
+    print(f"  FLASHSCORE RATINGS — run.py  (v{_ver})")
     print("=" * 55)
 
     if images_only:

@@ -1210,55 +1210,9 @@ async def fetch_from_roster(name: str, roster: list, page,
                     _ss_pid = _ss_match["id"]
 
             if _ss_pid is not None:
-                # ── FotMob: sursa primara, 400x400 transparent PNG ──────────
-                _fm_body = b""
-                try:
-                    import urllib.request as _fm_req, json as _fm_json
-                    _FM_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-                    _fm_search_url = (
-                        "https://apigw.fotmob.com/searchapi/typesearch/player/"
-                        f"?term={_up_ss.quote_plus(clean_no_init or clean)}&lang=en"
-                    )
-                    _fm_req_obj = _fm_req.Request(_fm_search_url, headers={
-                        "User-Agent": _FM_UA, "Accept": "application/json",
-                        "Accept-Language": "en-US,en;q=0.9",
-                    })
-                    with _fm_req.urlopen(_fm_req_obj, timeout=8) as _fm_r:
-                        _fm_data = _fm_json.loads(_fm_r.read())
-                    _fm_hits = (_fm_data.get("squad") or _fm_data.get("players")
-                                or _fm_data.get("hits") or [])
-                    _fm_pid = None
-                    for _fp in _fm_hits:
-                        _fm_team = (_fp.get("teamName") or _fp.get("team") or "")
-                        if _ss_team and (_ss_team.lower() in _fm_team.lower()
-                                         or _fm_team.lower() in _ss_team.lower()):
-                            _fm_pid = str(_fp.get("id") or _fp.get("participantId") or "")
-                            break
-                    if not _fm_pid and _fm_hits:
-                        _fm_pid = str(_fm_hits[0].get("id") or _fm_hits[0].get("participantId") or "")
-                    if _fm_pid:
-                        _fm_img_url = f"https://images.fotmob.com/image_resources/playerimages/{_fm_pid}.png"
-                        _fm_img_req = _fm_req.Request(_fm_img_url, headers={
-                            "User-Agent": _FM_UA, "Referer": "https://www.fotmob.com/",
-                        })
-                        with _fm_req.urlopen(_fm_img_req, timeout=8) as _fm_ir:
-                            _fm_body = _fm_ir.read()
-                        if len(_fm_body) < 1000:
-                            _fm_body = b""
-                except Exception:
-                    _fm_body = b""
-
-                if _fm_body:
-                    print(f"[photo ✓]", end=" ", flush=True)
-                    return _fm_body, "", "photo", ""
-
-                # ── Sofascore fallback: 150x150, remove white bg ────────────
-                _img_hdrs = {"Referer": "https://www.sofascore.com/"}
-                _body = b""
                 _img_r = await ss_ctx.request.get(
                     f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image",
-                    headers=_img_hdrs
+                    headers={"Referer": "https://www.sofascore.com/"}
                 )
                 _body = await _img_r.body()
                 if _img_r.status == 200 and len(_body) > 500:

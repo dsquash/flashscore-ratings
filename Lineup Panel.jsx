@@ -270,6 +270,12 @@
             // Adauga temporar in coada AE (Media Encoder o preia de-aici)
             var rqItem = rq.items.add(comp);
 
+            // Seteaza locatia de output pe Desktop
+            try {
+                var _outPath = Folder.desktop.fsName.replace(/\\/g, "/") + "/" + comp.name + ".mp4";
+                rqItem.outputModules[1].file = new File(_outPath);
+            } catch(_oe) {}
+
             // Trimite in Adobe Media Encoder si porneste randarea
             rq.queueInAME(true);
 

@@ -256,20 +256,28 @@
 
 
         try {
-            // Add comp to AE Render Queue
-            var rqItem = app.project.renderQueue.items.add(comp);
+            var rq = app.project.renderQueue;
 
-            // Set output file to Desktop
-            var outputPath = Folder.desktop.fsName.replace(/\\/g, "/") + "/" + comp.name + ".avi";
-            rqItem.outputModules[1].file = new File(outputPath);
+            // Sterge orice item existent pentru aceasta compozitie (evita dublarea)
+            for (var _ri = rq.items.length; _ri >= 1; _ri--) {
+                try {
+                    if (rq.items[_ri].comp === comp) {
+                        rq.items[_ri].remove();
+                    }
+                } catch(_e) {}
+            }
 
-            // Open the Render Queue panel
-            app.executeCommand(2161);
+            // Adauga compozitia in coada AE (Media Encoder o preia de-aici)
+            rq.items.add(comp);
 
-            statusTxt.text = "\u2713 Added to Render Queue: " + comp.name;
+            // Trimite in Adobe Media Encoder si porneste randarea
+            rq.queueInAME(true);
+
+            statusTxt.text = "\u2713 Sent to Adobe Media Encoder: " + comp.name;
         } catch(e) {
-            statusTxt.text = "Render Queue error \u2014 see alert.";
-            alert("Could not add to Render Queue:\n" + (e.message || String(e)));
+            statusTxt.text = "Media Encoder error \u2014 see alert.";
+            alert("Could not send to Adobe Media Encoder:\n" + (e.message || String(e)) +
+                  "\n\nMake sure Adobe Media Encoder is installed and running.");
         }
 
         try { panel.layout.layout(true); } catch(e) {}

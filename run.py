@@ -1210,12 +1210,27 @@ async def fetch_from_roster(name: str, roster: list, page,
                     _ss_pid = _ss_match["id"]
 
             if _ss_pid is not None:
-                _img_r = await ss_ctx.request.get(
-                    f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image",
-                    headers={"Referer": "https://www.sofascore.com/"}
-                )
-                _body = await _img_r.body()
-                if _img_r.status == 200 and len(_body) > 500:
+                # Incearca dimensiuni descrescatoare: large > medium > standard
+                _img_hdrs = {
+                    "Referer": "https://www.sofascore.com/",
+                    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                    "DPR": "2",
+                }
+                _body = b""
+                for _img_suffix in ["large", "medium", ""]:
+                    _img_url = (f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image"
+                                + (f"/{_img_suffix}" if _img_suffix else ""))
+                    _img_r = await ss_ctx.request.get(_img_url, headers=_img_hdrs)
+                    _candidate = await _img_r.body()
+                    if _img_r.status == 200 and len(_candidate) > 500:
+                        try:
+                            _tw, _th = _PILss.open(_io_ss.BytesIO(_candidate)).size
+                        except Exception:
+                            _tw = 0
+                        if _tw >= 100 or _img_suffix == "":
+                            _body = _candidate
+                            break
+                if len(_body) > 500:
                     try:
                         _pil  = _PILss.open(_io_ss.BytesIO(_body)).convert("RGBA")
                         _w, _h = _pil.size

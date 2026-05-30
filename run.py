@@ -1144,7 +1144,8 @@ async def fetch_from_roster(name: str, roster: list, page,
                              overrides: dict = None, match_type: str = "club",
                              flashscore_url: str = "", team_id: int = 0,
                              team_name: str = "", img_src: str = "",
-                             ss_ctx=None, ss_lineup_map: dict = None):
+                             ss_ctx=None, ss_lineup_map: dict = None,
+                             ss_image_cache: dict = None):
     """
     Descarca poza jucatorului (sursa primara + fallback).
     Returneaza (photo_bytes, kit_number, source_label, sofifa_url).
@@ -1212,13 +1213,19 @@ async def fetch_from_roster(name: str, roster: list, page,
             if _ss_pid is not None:
                 _img_url = f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image"
                 _body = b""
-                # 1) Navigheaza pagina direct la URL-ul imaginii (ca un om care o deschide)
-                try:
-                    _nav_resp = await page.goto(_img_url, wait_until="load", timeout=15000)
-                    if _nav_resp and _nav_resp.ok:
-                        _body = await _nav_resp.body()
-                except Exception:
-                    _body = b""
+                # 0) Foloseste imaginea capturata din pagina meciului (full-size)
+                if ss_image_cache:
+                    _cached = ss_image_cache.get(str(_ss_pid))
+                    if _cached and len(_cached) > 500:
+                        _body = _cached
+                # 1) Daca nu e in cache, navigheaza direct la URL-ul imaginii
+                if len(_body) <= 500:
+                    try:
+                        _nav_resp = await page.goto(_img_url, wait_until="load", timeout=15000)
+                        if _nav_resp and _nav_resp.ok:
+                            _body = await _nav_resp.body()
+                    except Exception:
+                        _body = b""
                 # 2) Fallback: ctx.request daca navigarea a esuat
                 if len(_body) <= 500:
                     try:
@@ -1473,28 +1480,62 @@ async def download_all_images(data: dict, images_only: bool = False,
                 print(f"  [Sofascore lineup] Event ID: {_ss_event_id}")
                 home_lineup_map, away_lineup_map = await _fetch_sofascore_lineup(ss_ctx, _ss_event_id)
 
-            # ── 0.2 Warmup sesiune: navigheaza pe pagina meciului ──────
-            # CDN-ul de imagini Sofascore serveste varianta mica (42x42) fara
-            # cookie-uri de sesiune. Vizitand pagina meciului, contextul primeste
-            # cookie-urile -> request-urile de imagini ulterioare vin full-size.
+            # ── 0.2 Intercepteaza imaginile incarcate de pagina meciului ──
+            # In loc sa re-descarcam URL-ul (care da 42x42 fara sesiune),
+            # capturam exact bytes-ii pe care browser-ul ii primeste cand pagina
+            # incarca pozele jucatorilor. Ocoleste complet problema de marime/CORS.
+            ss_image_cache: dict = {}   # {player_id(str): image_bytes}
             if sofascore_url:
                 try:
-                    print("  [Sofascore] Warming up session...", flush=True)
+                    print("  [Sofascore] Loading match page & capturing photos...", flush=True)
+
+                    _pending_resps = []
+                    def _on_resp(_resp):
+                        try:
+                            _m = re.search(r'/api/v1/player/(\d+)/image', _resp.url)
+                            if _m and _resp.status == 200:
+                                _pending_resps.append((_m.group(1), _resp))
+                        except Exception:
+                            pass
+                    page.on("response", _on_resp)
+
                     await page.goto(sofascore_url, wait_until="domcontentloaded", timeout=30000)
                     await page.wait_for_timeout(3500)
-                    # Incearca sa apese tab-ul Lineups ca sa se incarce pozele
+                    # Apasa tab-ul Lineups ca sa se incarce toate pozele
                     for _sel in ["text=Lineups", "text=Line-ups", "a[href*='lineups']"]:
                         try:
                             _el = await page.query_selector(_sel)
                             if _el:
                                 await _el.click(timeout=2000)
-                                await page.wait_for_timeout(2500)
+                                await page.wait_for_timeout(3000)
                                 break
                         except Exception:
                             pass
-                    print("  [Sofascore] Session ready.", flush=True)
+                    # Scroll ca sa se incarce pozele lazy-loaded
+                    for _ in range(4):
+                        try:
+                            await page.mouse.wheel(0, 1200)
+                            await page.wait_for_timeout(700)
+                        except Exception:
+                            break
+                    await page.wait_for_timeout(1500)
+
+                    try:
+                        page.remove_listener("response", _on_resp)
+                    except Exception:
+                        pass
+
+                    # Pastreaza cea mai mare imagine per jucator (cea mai inalta calitate)
+                    for _pid_str, _resp in _pending_resps:
+                        try:
+                            _b = await _resp.body()
+                            if _b and len(_b) > len(ss_image_cache.get(_pid_str, b"")):
+                                ss_image_cache[_pid_str] = _b
+                        except Exception:
+                            pass
+                    print(f"  [Sofascore] Captured {len(ss_image_cache)} player photos.", flush=True)
                 except Exception as _w:
-                    print(f"  [Sofascore] warmup skipped: {_w}", flush=True)
+                    print(f"  [Sofascore] capture skipped: {_w}", flush=True)
 
             # ── 1. Descarca logo-uri echipe din Flashscore ────────────────
             fs_home_logo = data.get("match", {}).get("home_logo_url", "")
@@ -1599,6 +1640,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                             img_src=_t["p"].get("img_src", ""),
                             ss_ctx=ss_ctx,
                             ss_lineup_map=_t.get("ss_lineup_map"),
+                            ss_image_cache=ss_image_cache,
                         )
                     except BaseException as _e:
                         print(f"\n      ⚠ Crash '{_t['name']}': {type(_e).__name__}: {_e}")

@@ -1210,20 +1210,25 @@ async def fetch_from_roster(name: str, roster: list, page,
                     _ss_pid = _ss_match["id"]
 
             if _ss_pid is not None:
-                # Headere identice cu ce trimite Chrome cand incarca o imagine din pagina
-                _img_hdrs = {
-                    "Referer": "https://www.sofascore.com/",
-                    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-                    "Sec-Fetch-Dest": "image",
-                    "Sec-Fetch-Mode": "no-cors",
-                    "Sec-Fetch-Site": "same-site",
-                    "Origin": "https://www.sofascore.com",
-                }
-                _img_r = await ss_ctx.request.get(
-                    f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image",
-                    headers=_img_hdrs
-                )
-                _body = await _img_r.body()
+                _img_url = f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image"
+                _body = b""
+                # 1) Navigheaza pagina direct la URL-ul imaginii (ca un om care o deschide)
+                try:
+                    _nav_resp = await page.goto(_img_url, wait_until="load", timeout=15000)
+                    if _nav_resp and _nav_resp.ok:
+                        _body = await _nav_resp.body()
+                except Exception:
+                    _body = b""
+                # 2) Fallback: ctx.request daca navigarea a esuat
+                if len(_body) <= 500:
+                    try:
+                        _img_r = await ss_ctx.request.get(_img_url, headers={
+                            "Referer": "https://www.sofascore.com/",
+                            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                        })
+                        _body = await _img_r.body()
+                    except Exception:
+                        _body = b""
                 if len(_body) > 500:
                     try:
                         _pil  = _PILss.open(_io_ss.BytesIO(_body)).convert("RGBA")
@@ -1246,7 +1251,11 @@ async def fetch_from_roster(name: str, roster: list, page,
                         _body = _buf.getvalue()
                     except Exception:
                         pass
-                    print(f"[photo ✓]", end=" ", flush=True)
+                    try:
+                        _dbg_w, _dbg_h = _PILss.open(_io_ss.BytesIO(_body)).size
+                        print(f"[photo ✓ {_dbg_w}x{_dbg_h}]", end=" ", flush=True)
+                    except Exception:
+                        print(f"[photo ✓]", end=" ", flush=True)
                     return _body, "", "photo", ""
                 else:
                     print(f"[no image]", end=" ", flush=True)

@@ -1357,8 +1357,6 @@ def save_image(raw: bytes, path: Path) -> bool:
             img = Image.open(io.BytesIO(raw)).convert("RGBA")
             if img.width < 10:
                 return False
-            if img.width < 200:
-                img = img.resize((200, 200), Image.LANCZOS)
             img.save(str(path), format="PNG")
             return True
         except Exception:

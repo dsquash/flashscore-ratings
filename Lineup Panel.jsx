@@ -267,11 +267,14 @@
                 } catch(_e) {}
             }
 
-            // Adauga compozitia in coada AE (Media Encoder o preia de-aici)
-            rq.items.add(comp);
+            // Adauga temporar in coada AE (Media Encoder o preia de-aici)
+            var rqItem = rq.items.add(comp);
 
             // Trimite in Adobe Media Encoder si porneste randarea
             rq.queueInAME(true);
+
+            // Scoate item-ul din coada AE — ramane doar in Media Encoder
+            try { rqItem.remove(); } catch(_e) {}
 
             statusTxt.text = "\u2713 Sent to Adobe Media Encoder: " + comp.name;
         } catch(e) {

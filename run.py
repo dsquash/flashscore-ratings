@@ -1473,6 +1473,29 @@ async def download_all_images(data: dict, images_only: bool = False,
                 print(f"  [Sofascore lineup] Event ID: {_ss_event_id}")
                 home_lineup_map, away_lineup_map = await _fetch_sofascore_lineup(ss_ctx, _ss_event_id)
 
+            # ── 0.2 Warmup sesiune: navigheaza pe pagina meciului ──────
+            # CDN-ul de imagini Sofascore serveste varianta mica (42x42) fara
+            # cookie-uri de sesiune. Vizitand pagina meciului, contextul primeste
+            # cookie-urile -> request-urile de imagini ulterioare vin full-size.
+            if sofascore_url:
+                try:
+                    print("  [Sofascore] Warming up session...", flush=True)
+                    await page.goto(sofascore_url, wait_until="domcontentloaded", timeout=30000)
+                    await page.wait_for_timeout(3500)
+                    # Incearca sa apese tab-ul Lineups ca sa se incarce pozele
+                    for _sel in ["text=Lineups", "text=Line-ups", "a[href*='lineups']"]:
+                        try:
+                            _el = await page.query_selector(_sel)
+                            if _el:
+                                await _el.click(timeout=2000)
+                                await page.wait_for_timeout(2500)
+                                break
+                        except Exception:
+                            pass
+                    print("  [Sofascore] Session ready.", flush=True)
+                except Exception as _w:
+                    print(f"  [Sofascore] warmup skipped: {_w}", flush=True)
+
             # ── 1. Descarca logo-uri echipe din Flashscore ────────────────
             fs_home_logo = data.get("match", {}).get("home_logo_url", "")
             fs_away_logo = data.get("match", {}).get("away_logo_url", "")

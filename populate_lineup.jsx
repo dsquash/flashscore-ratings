@@ -233,6 +233,7 @@ var playerGlobalIdx = 0;
               "\n\nRun run.py first to generate the data.");
         return;
     }
+    jf.encoding = "UTF-8";
     jf.open("r");
     var data = JSON.parse(jf.read());
     jf.close();

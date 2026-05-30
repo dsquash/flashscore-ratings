@@ -82,6 +82,7 @@ var TEMPLATE_COMP_NAME       = "home_player_01";
     var jf = new File(normPath(dir) + "/flashscore_output/data.json");
     if (jf.exists) {
         try {
+            jf.encoding = "UTF-8";
             jf.open("r");
             var data = JSON.parse(jf.read());
             jf.close();
@@ -101,6 +102,7 @@ var TEMPLATE_COMP_NAME       = "home_player_01";
     var stateFile = new File(normPath(dir) + "/flashscore_output/template_state.json");
     if (stateFile.exists) {
         try {
+            stateFile.encoding = "UTF-8";
             stateFile.open("r");
             var stateData = JSON.parse(stateFile.read());
             stateFile.close();

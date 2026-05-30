@@ -138,7 +138,7 @@ def scrape_flashscore(url: str) -> dict:
     print(f"      {lineups_url}")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=False)
         ctx = browser.new_context(
             user_agent=UA,
             viewport={"width": 1400, "height": 900},
@@ -1417,12 +1417,11 @@ async def download_all_images(data: dict, images_only: bool = False,
     async with async_playwright() as pw:
         try:
             browser = await pw.chromium.launch(
-                headless=True,    # SoFIFA fetch mutat pe urllib.request; Flashscore merge si headless
+                headless=False,   # vizibil — headless cauza probleme cu CDN-ul de imagini
                 args=[
                     "--no-sandbox",
                     "--disable-blink-features=AutomationControlled",
                     "--disable-dev-shm-usage",
-                    "--window-position=9999,9999",  # off-screen — nu se vede
                     "--window-size=1280,800",
                 ]
             )

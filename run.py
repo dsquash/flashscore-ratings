@@ -1210,12 +1210,19 @@ async def fetch_from_roster(name: str, roster: list, page,
                     _ss_pid = _ss_match["id"]
 
             if _ss_pid is not None:
-                _img_r = await ss_ctx.request.get(
+                # Incearca /large (calitate maxima), fallback la /image standard
+                _img_hdrs = {"Referer": "https://www.sofascore.com/"}
+                _body = b""
+                for _img_url in [
+                    f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image/large",
                     f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image",
-                    headers={"Referer": "https://www.sofascore.com/"}
-                )
-                _body = await _img_r.body()
-                if _img_r.status == 200 and len(_body) > 500:
+                ]:
+                    _img_r = await ss_ctx.request.get(_img_url, headers=_img_hdrs)
+                    _body  = await _img_r.body()
+                    if _img_r.status == 200 and len(_body) > 500:
+                        break  # got a good image
+                    _body = b""
+                if len(_body) > 500:
                     # Elimina fundalul alb cu flood-fill de la colturi
                     try:
                         _pil  = _PILss.open(_io_ss.BytesIO(_body)).convert("RGBA")

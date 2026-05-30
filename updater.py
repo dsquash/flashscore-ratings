@@ -89,8 +89,37 @@ def _fetch_url(url: str, timeout: int = 10) -> bytes:
         parts = url.split("/")
         parts[-1] = quote(parts[-1], safe="/")
         url = "/".join(parts)
-    with urllib.request.urlopen(url, timeout=timeout) as r:
+    # Cache-bust raw CDN (raw.githubusercontent.com caches aggressively ~5 min)
+    sep = "&" if "?" in url else "?"
+    url = f"{url}{sep}cb={int(__import__('time').time())}"
+    req = urllib.request.Request(url, headers={
+        "Cache-Control": "no-cache, no-store, max-age=0",
+        "Pragma": "no-cache",
+        "User-Agent": "flashscore-ratings-updater",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
+
+
+def _fetch_file_via_api(filename: str, timeout: int = 30) -> bytes:
+    """Descarca un fisier prin GitHub API (fara cache CDN, mereu proaspat)."""
+    import urllib.request, json as _json, base64 as _b64
+    from urllib.parse import quote
+    api_url = (f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
+               f"/contents/{quote(filename)}?ref={BRANCH}")
+    req = urllib.request.Request(api_url, headers={
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "flashscore-ratings-updater",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        obj = _json.loads(r.read())
+    # File <1MB: content inline (base64). Larger: fall back to download_url.
+    if obj.get("content"):
+        return _b64.b64decode(obj["content"])
+    dl = obj.get("download_url")
+    if dl:
+        return _fetch_url(dl, timeout=timeout)
+    raise RuntimeError(f"No content for {filename}")
 
 
 def _verify_file(data: bytes, filename: str) -> bool:
@@ -167,7 +196,7 @@ def apply_update(progress_cb=None) -> tuple:
             continue
 
         try:
-            data = _fetch_url(url, timeout=30)
+            data = _fetch_file_via_api(filename, timeout=30)
             if not _verify_file(data, filename):
                 failed.append(f"{filename}: integritate esuata (fisier corupt sau prea mic)")
             else:

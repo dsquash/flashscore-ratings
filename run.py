@@ -1093,23 +1093,23 @@ def _parse_sofascore_event_id(url: str) -> str:
     return ""
 
 
-async def _fetch_sofascore_lineup(ss_ctx, event_id: str) -> tuple:
+async def _fetch_sofascore_lineup(page, event_id: str) -> tuple:
     """
-    Descarca lineup-ul unui meci Sofascore.
+    Descarca lineup-ul unui meci Sofascore navigand pe URL-ul API cu page.goto.
+    (ctx.request primeste 403 de la Sofascore; page.goto ca document trece.)
     Returneaza (home_map, away_map) unde fiecare map e {normalized_name: player_id}.
     """
     if not event_id:
         return {}, {}
     try:
-        _hdrs = {"Referer": "https://www.sofascore.com/", "Accept": "application/json"}
-        _r = await ss_ctx.request.get(
-            f"https://api.sofascore.com/api/v1/event/{event_id}/lineups",
-            headers=_hdrs
-        )
-        if _r.status != 200:
-            print(f"  ⚠ Sofascore lineup: HTTP {_r.status}")
+        import json as _json_ll
+        _api_url = f"https://api.sofascore.com/api/v1/event/{event_id}/lineups"
+        _resp = await page.goto(_api_url, wait_until="load", timeout=20000)
+        if not _resp or not _resp.ok:
+            print(f"  ⚠ Sofascore lineup: HTTP {_resp.status if _resp else 'none'}")
             return {}, {}
-        _data = await _r.json()
+        _txt = await _resp.text()
+        _data = _json_ll.loads(_txt)
         
         def _build_map(side_data):
             _map = {}
@@ -1180,16 +1180,21 @@ async def fetch_from_roster(name: str, roster: list, page,
                             break
 
             if not _ss_pid:
-                # ── 1b. Search API (cand nu exista lineup map) ──
-                _ss_hdrs = {"Referer": "https://www.sofascore.com/", "Accept": "application/json"}
+                # ── 1b. Search API (cand nu exista lineup map) — via page.goto ──
                 _ss_team = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', team_name or '').strip()
                 _ss_q    = _up_ss.quote_plus(clean_no_init or clean)
 
-                _ss_r = await ss_ctx.request.get(
-                    f"https://api.sofascore.com/api/v1/search/all?q={_ss_q}",
-                    headers=_ss_hdrs
-                )
-                _ss_results = (await _ss_r.json()).get("results", []) if _ss_r.status == 200 else []
+                _ss_results = []
+                try:
+                    import json as _json_ss2
+                    _ss_sr = await page.goto(
+                        f"https://api.sofascore.com/api/v1/search/all?q={_ss_q}",
+                        wait_until="load", timeout=15000
+                    )
+                    if _ss_sr and _ss_sr.ok:
+                        _ss_results = _json_ss2.loads(await _ss_sr.text()).get("results", [])
+                except Exception:
+                    _ss_results = []
 
                 _ss_match = None
                 for _res in _ss_results:
@@ -1472,7 +1477,7 @@ async def download_all_images(data: dict, images_only: bool = False,
             _ss_event_id = _parse_sofascore_event_id(sofascore_url)
             if _ss_event_id:
                 print(f"  [Sofascore lineup] Event ID: {_ss_event_id}")
-                home_lineup_map, away_lineup_map = await _fetch_sofascore_lineup(ss_ctx, _ss_event_id)
+                home_lineup_map, away_lineup_map = await _fetch_sofascore_lineup(page, _ss_event_id)
 
             # ── 1. Descarca logo-uri echipe din Flashscore ────────────────
             fs_home_logo = data.get("match", {}).get("home_logo_url", "")

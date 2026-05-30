@@ -134,6 +134,7 @@ class App(_BASE_CLS):
 
         self._build_ui()
         self._load_state()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         threading.Thread(target=self._bg_update_check, daemon=True).start()
 
     def _setup_plain_ttk_style(self):
@@ -306,6 +307,38 @@ class App(_BASE_CLS):
         ss_url = read_last_ss_url()
         if ss_url:
             self.ss_url_var.set(ss_url)
+
+    def _on_close(self):
+        # Save the Sofascore URL so it persists for next launch
+        try:
+            write_last_ss_url(self.ss_url_var.get().strip())
+        except Exception:
+            pass
+        # On macOS, close the Terminal window that launched this app
+        if IS_MAC:
+            try:
+                import os as _os
+                _tty = ""
+                for _fd in (0, 1, 2):
+                    try:
+                        _tty = _os.ttyname(_fd)
+                        if _tty:
+                            break
+                    except Exception:
+                        continue
+                if _tty:
+                    _short = _tty.replace("/dev/", "")
+                    _os.system(
+                        "osascript -e 'tell application \"Terminal\" to close "
+                        "(every window whose tty contains \"" + _short + "\")' "
+                        ">/dev/null 2>&1 &"
+                    )
+            except Exception:
+                pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     def _paste_url(self):
         try:

@@ -138,7 +138,7 @@ def scrape_flashscore(url: str) -> dict:
     print(f"      {lineups_url}")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         ctx = browser.new_context(
             user_agent=UA,
             viewport={"width": 1400, "height": 900},
@@ -1432,8 +1432,9 @@ async def download_all_images(data: dict, images_only: bool = False,
     async with async_playwright() as pw:
         try:
             browser = await pw.chromium.launch(
-                headless=False,   # vizibil — headless cauza probleme cu CDN-ul de imagini
+                headless=True,    # page.goto merge si headless (testat: 150x150)
                 args=[
+                    "--window-position=9999,9999",
                     "--no-sandbox",
                     "--disable-blink-features=AutomationControlled",
                     "--disable-dev-shm-usage",

@@ -45,4 +45,12 @@ if [ ! -f "$SCRIPTS_DIR/launcher.py" ]; then
     exit 1
 fi
 
-exec "$PY_BIN" "$SCRIPTS_DIR/launcher.py"
+# Capture this Terminal's tty so we can close its window after the app exits
+TTY_DEV="$(tty 2>/dev/null)"
+
+"$PY_BIN" "$SCRIPTS_DIR/launcher.py"
+
+# App closed — close this Terminal window automatically
+if [ -n "$TTY_DEV" ]; then
+    osascript -e "tell application \"Terminal\" to close (every window whose tty is \"$TTY_DEV\")" >/dev/null 2>&1 &
+fi

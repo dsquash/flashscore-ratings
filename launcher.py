@@ -17,6 +17,7 @@ from pathlib import Path
 
 BASE_DIR  = Path(__file__).parent
 LAST_URL  = BASE_DIR / "flashscore_output" / "last_url.txt"
+LAST_SS_URL = BASE_DIR / "flashscore_output" / "last_ss_url.txt"
 RUN_PY    = BASE_DIR / "run.py"
 OVERRIDES = BASE_DIR / "sofifa_overrides.json"
 
@@ -53,6 +54,21 @@ def read_last_url():
         return LAST_URL.read_text(encoding="utf-8").strip()
     except Exception:
         return ""
+
+
+def read_last_ss_url():
+    try:
+        return LAST_SS_URL.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def write_last_ss_url(url: str):
+    try:
+        LAST_SS_URL.parent.mkdir(parents=True, exist_ok=True)
+        LAST_SS_URL.write_text(url or "", encoding="utf-8")
+    except Exception:
+        pass
 
 
 def read_match_type():
@@ -287,6 +303,9 @@ class App(_BASE_CLS):
         url = read_last_url()
         if url:
             self.url_var.set(url)
+        ss_url = read_last_ss_url()
+        if ss_url:
+            self.ss_url_var.set(ss_url)
 
     def _paste_url(self):
         try:
@@ -386,8 +405,10 @@ class App(_BASE_CLS):
         if extra_args:
             cmd.extend(extra_args)
         ss_url = self.ss_url_var.get().strip() if hasattr(self, 'ss_url_var') else ""
-        if ss_url and script == "run.py" and not extra_args:
-            cmd.extend(["--sofascore-url", ss_url])
+        if script == "run.py" and not extra_args:
+            write_last_ss_url(ss_url)  # remember it for next launch
+            if ss_url:
+                cmd.extend(["--sofascore-url", ss_url])
 
         label = "Full Run" if (script == "run.py" and not extra_args) else \
                 "Refresh + Photos" if (script == "refresh_stats.py" and extra_args and "--download-missing" in extra_args) else \

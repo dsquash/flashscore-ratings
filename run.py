@@ -1112,27 +1112,34 @@ async def _fetch_sofascore_lineup(page, event_id: str) -> tuple:
         _data = _json_ll.loads(_txt)
         
         def _build_map(side_data):
-            _map = {}
+            # Returneaza {"names": {nume_norm: pid}, "nums": {numar_tricou: pid}}
+            _names = {}
+            _nums  = {}
             for _entry in side_data.get("players", []):
                 _p = _entry.get("player", {})
                 _pid = _p.get("id")
                 if not _pid:
                     continue
+                # Numar de tricou — potrivire neambigua (rezolva 2 jucatori cu acelasi prenume)
+                _jersey = _entry.get("shirtNumber") or _entry.get("jerseyNumber") or _p.get("jerseyNumber")
+                if _jersey is not None and str(_jersey).strip():
+                    _nums[str(_jersey).strip()] = _pid
                 for _fname in ["name", "shortName"]:
                     _n = _p.get(_fname, "")
                     if _n:
-                        _map[_ss_norm(_n)] = _pid
-                        # Si varianta fara initiala/prenume scurt
+                        _names[_ss_norm(_n)] = _pid
                         _parts = _n.split()
                         if len(_parts) > 1:
-                            _map[_ss_norm(_parts[-1])] = _pid  # doar prenumele
-                            _map[_ss_norm(' '.join(_parts[:2]))] = _pid
-            return _map
+                            _names[_ss_norm(_parts[-1])] = _pid
+                            _names[_ss_norm(' '.join(_parts[:2]))] = _pid
+            return {"names": _names, "nums": _nums}
         
         home_map = _build_map(_data.get("home", {}))
         away_map = _build_map(_data.get("away", {}))
-        total = len(set(home_map.values())) + len(set(away_map.values()))
-        print(f"  ✓ Sofascore lineup: {len(set(home_map.values()))} home + {len(set(away_map.values()))} away players")
+        _hn = len(set(home_map["names"].values()))
+        _an = len(set(away_map["names"].values()))
+        print(f"  ✓ Sofascore lineup: {_hn} home + {_an} away players "
+              f"({len(home_map['nums'])}+{len(away_map['nums'])} with jersey #)")
         return home_map, away_map
     except Exception as _e:
         print(f"  ⚠ Sofascore lineup error: {_e}")
@@ -1144,7 +1151,8 @@ async def fetch_from_roster(name: str, roster: list, page,
                              overrides: dict = None, match_type: str = "club",
                              flashscore_url: str = "", team_id: int = 0,
                              team_name: str = "", img_src: str = "",
-                             ss_ctx=None, ss_lineup_map: dict = None):
+                             ss_ctx=None, ss_lineup_map: dict = None,
+                             ss_player_number: str = ""):
     """
     Descarca poza jucatorului (sursa primara + fallback).
     Returneaza (photo_bytes, kit_number, source_label, sofifa_url).
@@ -1164,20 +1172,29 @@ async def fetch_from_roster(name: str, roster: list, page,
             # ── 1a. Lineup map exact match (cand e data URL Sofascore) ──
             _ss_pid = None
             if ss_lineup_map:
-                for _try_name in [clean_no_init, clean]:
-                    if not _try_name:
-                        continue
-                    _k = _ss_norm(_try_name)
-                    if _k in ss_lineup_map:
-                        _ss_pid = ss_lineup_map[_k]
-                        break
-                    # Incearca si doar ultimul cuvant (prenume)
-                    _parts = _try_name.split()
-                    if len(_parts) > 1:
-                        _k2 = _ss_norm(_parts[-1])
-                        if _k2 in ss_lineup_map:
-                            _ss_pid = ss_lineup_map[_k2]
+                _names_map = ss_lineup_map.get("names", {}) if isinstance(ss_lineup_map, dict) else {}
+                _nums_map  = ss_lineup_map.get("nums", {})  if isinstance(ss_lineup_map, dict) else {}
+
+                # 1a-i. Potrivire dupa NUMARUL DE TRICOU (neambigua) — prioritar
+                _kit = str(ss_player_number).strip() if ss_player_number else ""
+                if _kit and _kit in _nums_map:
+                    _ss_pid = _nums_map[_kit]
+
+                # 1a-ii. Potrivire dupa nume (daca nu am gasit dupa numar)
+                if not _ss_pid:
+                    for _try_name in [clean_no_init, clean]:
+                        if not _try_name:
+                            continue
+                        _k = _ss_norm(_try_name)
+                        if _k in _names_map:
+                            _ss_pid = _names_map[_k]
                             break
+                        _parts = _try_name.split()
+                        if len(_parts) > 1:
+                            _k2 = _ss_norm(_parts[-1])
+                            if _k2 in _names_map:
+                                _ss_pid = _names_map[_k2]
+                                break
 
             if not _ss_pid:
                 # ── 1b. Search API (cand nu exista lineup map) — via page.goto ──
@@ -1587,6 +1604,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                             img_src=_t["p"].get("img_src", ""),
                             ss_ctx=ss_ctx,
                             ss_lineup_map=_t.get("ss_lineup_map"),
+                            ss_player_number=_t["p"].get("number", ""),
                         )
                     except BaseException as _e:
                         print(f"\n      ⚠ Crash '{_t['name']}': {type(_e).__name__}: {_e}")

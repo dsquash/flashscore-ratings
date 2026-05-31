@@ -1112,18 +1112,28 @@ async def _fetch_sofascore_lineup(page, event_id: str) -> tuple:
         _data = _json_ll.loads(_txt)
         
         def _build_map(side_data):
-            # Returneaza {"names": {nume_norm: pid}, "nums": {numar_tricou: pid}}
+            # Returneaza {"names": {nume_norm: pid}, "nums": {numar: pid},
+            #             "surn": {nume_familie: [(pid, initiala_prenume), ...]}}
             _names = {}
             _nums  = {}
+            _surn  = {}
             for _entry in side_data.get("players", []):
                 _p = _entry.get("player", {})
                 _pid = _p.get("id")
                 if not _pid:
                     continue
-                # Numar de tricou — potrivire neambigua (rezolva 2 jucatori cu acelasi prenume)
+                # Numar de tricou — potrivire neambigua
                 _jersey = _entry.get("shirtNumber") or _entry.get("jerseyNumber") or _p.get("jerseyNumber")
                 if _jersey is not None and str(_jersey).strip():
                     _nums[str(_jersey).strip()] = _pid
+                # Nume de familie + initiala prenume (din numele complet de pe Sofascore)
+                _full = _p.get("name", "") or _p.get("shortName", "")
+                _fp = _full.split()
+                if len(_fp) >= 2:
+                    _surname = _ss_norm(_fp[-1])
+                    _initial = _ss_norm(_fp[0])[:1]   # prima litera a prenumelui
+                    if _surname:
+                        _surn.setdefault(_surname, []).append((_pid, _initial))
                 for _fname in ["name", "shortName"]:
                     _n = _p.get(_fname, "")
                     if _n:
@@ -1132,7 +1142,7 @@ async def _fetch_sofascore_lineup(page, event_id: str) -> tuple:
                         if len(_parts) > 1:
                             _names[_ss_norm(_parts[-1])] = _pid
                             _names[_ss_norm(' '.join(_parts[:2]))] = _pid
-            return {"names": _names, "nums": _nums}
+            return {"names": _names, "nums": _nums, "surn": _surn}
         
         home_map = _build_map(_data.get("home", {}))
         away_map = _build_map(_data.get("away", {}))
@@ -1174,13 +1184,14 @@ async def fetch_from_roster(name: str, roster: list, page,
             if ss_lineup_map:
                 _names_map = ss_lineup_map.get("names", {}) if isinstance(ss_lineup_map, dict) else {}
                 _nums_map  = ss_lineup_map.get("nums", {})  if isinstance(ss_lineup_map, dict) else {}
+                _surn_map  = ss_lineup_map.get("surn", {})  if isinstance(ss_lineup_map, dict) else {}
 
                 # 1a-i. Potrivire dupa NUMARUL DE TRICOU (neambigua) — prioritar
                 _kit = str(ss_player_number).strip() if ss_player_number else ""
                 if _kit and _kit in _nums_map:
                     _ss_pid = _nums_map[_kit]
 
-                # 1a-ii. Potrivire dupa nume (daca nu am gasit dupa numar)
+                # 1a-ii. Potrivire dupa nume complet exact
                 if not _ss_pid:
                     for _try_name in [clean_no_init, clean]:
                         if not _try_name:
@@ -1189,6 +1200,39 @@ async def fetch_from_roster(name: str, roster: list, page,
                         if _k in _names_map:
                             _ss_pid = _names_map[_k]
                             break
+
+                # 1a-iii. Potrivire dupa NUME DE FAMILIE + INITIALA prenumelui
+                #   ex: Flashscore "Magalhães G." -> familie "magalhaes", initiala "g"
+                #   cauta pe Sofascore jucatorul cu acelasi nume de familie a carui
+                #   prenume incepe cu acea initiala (dezambiguizeaza Silva B. vs Silva T.)
+                if not _ss_pid:
+                    # Extrage numele de familie si initiala din numele Flashscore
+                    _fs_tokens = clean.split()
+                    _fs_initial = ""
+                    _fs_surname_tokens = []
+                    for _tok in _fs_tokens:
+                        _tt = _tok.replace(".", "")
+                        if len(_tt) == 1 and _tt.isalpha():
+                            _fs_initial = _ss_norm(_tt)[:1]   # token de o litera = initiala
+                        else:
+                            _fs_surname_tokens.append(_tok)
+                    # numele de familie = ultimul token "lung" (sau tot, daca nu separam)
+                    _fs_surname = _ss_norm(_fs_surname_tokens[-1]) if _fs_surname_tokens else ""
+                    if _fs_surname and _fs_surname in _surn_map:
+                        _cands = _surn_map[_fs_surname]
+                        if len(_cands) == 1:
+                            _ss_pid = _cands[0][0]   # un singur jucator cu acel nume de familie
+                        elif _fs_initial:
+                            for _cpid, _cinit in _cands:
+                                if _cinit == _fs_initial:
+                                    _ss_pid = _cpid
+                                    break
+
+                # 1a-iv. Ultima incercare: doar nume de familie (last word) in names map
+                if not _ss_pid:
+                    for _try_name in [clean_no_init, clean]:
+                        if not _try_name:
+                            continue
                         _parts = _try_name.split()
                         if len(_parts) > 1:
                             _k2 = _ss_norm(_parts[-1])

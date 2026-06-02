@@ -8,6 +8,7 @@ REM ============================================================
 
 set GITHUB_ZIP=https://github.com/dsquash/flashscore-ratings/archive/refs/heads/main.zip
 set GDRIVE_FOLDER_ID=1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti
+set GDRIVE_TEMPLATE_ZIP_ID=1p65csy_J7fytJV77JVDOHs8b54XQDX8k
 set GDRIVE_URL=https://drive.google.com/drive/folders/1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti
 
 set INSTALL_DIR=%~dp0
@@ -74,7 +75,7 @@ REM Create _DO NOT TOUCH_ folder
 if not exist "%SCRIPTS_DIR%" mkdir "%SCRIPTS_DIR%"
 
 REM Move script files into _DO NOT TOUCH_
-set SCRIPT_FILES=launcher.py run.py refresh_stats.py updater.py version.txt CHANGELOG.md sofija_overrides.json
+set SCRIPT_FILES=launcher.py run.py refresh_stats.py updater.py version.txt CHANGELOG.md sofifa_overrides.json
 for %%F in (%SCRIPT_FILES%) do (
     if exist "%TEMP%\flashscore_extract\flashscore-ratings-main\%%F" (
         copy /Y "%TEMP%\flashscore_extract\flashscore-ratings-main\%%F" "%SCRIPTS_DIR%\%%F" >nul
@@ -103,20 +104,31 @@ python -m pip install playwright httpx pillow gdown ttkbootstrap --quiet
 python -m playwright install chromium
 echo  [OK] Python packages installed.
 
-REM -- Download AE template from Google Drive
+REM -- Download AE template (single zip via direct HTTP, not gdown)
 echo.
-echo  [4/4] Downloading After Effects template from Google Drive...
-python -m gdown --folder "%GDRIVE_FOLDER_ID%" -O "%INSTALL_DIR%"
-if errorlevel 1 (
-    echo.
-    echo  [WARNING] Automatic download failed.
-    echo           Opening Google Drive in your browser -- download the folder manually.
-    echo           Save the files here: %INSTALL_DIR%
-    echo.
-    start "" "%GDRIVE_URL%"
+echo  [4/4] Downloading After Effects template...
+set TEMPLATE_AEP=%INSTALL_DIR%Match Ratings - Template.aep
+set TPL_ZIP=%TEMP%\flashscore_template.zip
+if exist "%TEMPLATE_AEP%" (
+    echo  [SKIP] After Effects template already installed.
 ) else (
-    echo  [OK] After Effects template downloaded.
+    powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'https://drive.usercontent.google.com/download?id=%GDRIVE_TEMPLATE_ZIP_ID%&export=download&confirm=t' -OutFile '%TPL_ZIP%' -UseBasicParsing; exit 0 } catch { exit 1 }"
+    if errorlevel 1 (
+        echo  [WARNING] Template download failed. Opening Google Drive...
+        start "" "%GDRIVE_URL%"
+    ) else (
+        powershell -NoProfile -Command "Expand-Archive -Path '%TPL_ZIP%' -DestinationPath '%INSTALL_DIR%' -Force"
+        del "%TPL_ZIP%" >nul 2>&1
+        rmdir /s /q "%INSTALL_DIR%__MACOSX" >nul 2>&1
+        if exist "%TEMP%\flashscore_extract\flashscore-ratings-main\template_version.txt" (
+            copy /Y "%TEMP%\flashscore_extract\flashscore-ratings-main\template_version.txt" "%SCRIPTS_DIR%\.template_version" >nul 2>&1
+        )
+        echo  [OK] After Effects template downloaded.
+    )
 )
+
+REM -- Cleanup extracted code
+rmdir /s /q "%TEMP%\flashscore_extract" >nul 2>&1
 
 REM -- Install AE panel
 echo.

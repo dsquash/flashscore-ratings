@@ -15,6 +15,7 @@ GITHUB_REPO="flashscore-ratings"
 BRANCH="main"
 RAW_BASE="https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${BRANCH}"
 GDRIVE_FOLDER_ID="1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti"
+GDRIVE_TEMPLATE_ZIP_ID="1p65csy_J7fytJV77JVDOHs8b54XQDX8k"   # single template .zip on Drive
 
 PYTHON_PKG_URL="https://www.python.org/ftp/python/3.12.8/python-3.12.8-macos11.pkg"
 PYTHON_ORG_BIN="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3"
@@ -298,7 +299,14 @@ if [ -f "$TEMPLATE_AEP" ] || [ -d "$TEMPLATE_FOLDER" ]; then
     skip "After Effects template"
 else
     fetch_template() {
-        "$PY_BIN" -m gdown --folder "$GDRIVE_FOLDER_ID" -O "$INSTALL_DIR" --quiet
+        [ -z "$GDRIVE_TEMPLATE_ZIP_ID" ] && return 1
+        local zip="$INSTALL_DIR/.template_dl.zip"
+        "$PY_BIN" -m gdown "$GDRIVE_TEMPLATE_ZIP_ID" -O "$zip" --quiet || return 1
+        [ -f "$zip" ] || return 1
+        # Unzip into INSTALL_DIR (overwrites)
+        ditto -x -k "$zip" "$INSTALL_DIR" 2>/dev/null || unzip -o -q "$zip" -d "$INSTALL_DIR" || return 1
+        rm -f "$zip"
+        [ -f "$TEMPLATE_AEP" ]
     }
     if ! run_step "Downloading After Effects template" fetch_template; then
         info "Template download failed — download manually from Google Drive if needed."

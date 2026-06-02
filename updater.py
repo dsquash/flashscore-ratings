@@ -39,6 +39,7 @@ RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{BRA
 
 # ── After Effects template (Google Drive) ─────────────────────────
 GDRIVE_FOLDER_ID      = "1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti"
+GDRIVE_TEMPLATE_ZIP_ID = "1p65csy_J7fytJV77JVDOHs8b54XQDX8k"   # single template .zip on Drive
 TEMPLATE_VERSION_FILE = BASE_DIR / ".template_version"   # local marker
 TEMPLATE_AEP          = ROOT_DIR / "Match Ratings - Template.aep"
 TEMPLATE_FOLDER       = ROOT_DIR / "Match Ratings - Template folder"
@@ -237,20 +238,40 @@ def apply_template_update(progress_cb=None) -> tuple:
     if progress_cb:
         progress_cb("Downloading template from Google Drive...")
 
+    if not GDRIVE_TEMPLATE_ZIP_ID:
+        return False, "Template zip not configured yet."
+
+    import zipfile
     _tmp = Path(tempfile.mkdtemp(prefix="fs_tpl_"))
     try:
+        _zip_path = _tmp / "template.zip"
+        # Single-file download (1 request, no folder throttling). gdown handles
+        # the Drive virus-scan confirm token automatically.
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "gdown", "--folder", GDRIVE_FOLDER_ID,
-                 "-O", str(_tmp), "--quiet"],
+                [sys.executable, "-m", "gdown", GDRIVE_TEMPLATE_ZIP_ID,
+                 "-O", str(_zip_path), "--quiet"],
                 capture_output=True, text=True, timeout=900
             )
         except Exception as e:
             return False, f"Download error: {e}"
 
-        # Locate the downloaded .aep anywhere under the temp dir
+        if not _zip_path.exists() or _zip_path.stat().st_size < 1000:
+            _err = (result.stderr or result.stdout or "").strip()
+            return False, f"Zip download failed. {_err[:200]}"
+
+        if progress_cb:
+            progress_cb("Extracting template...")
+        _extract = _tmp / "extracted"
+        try:
+            with zipfile.ZipFile(str(_zip_path)) as _z:
+                _z.extractall(str(_extract))
+        except Exception as e:
+            return False, f"Zip extract failed: {e}"
+
+        # Locate the downloaded .aep anywhere under the extracted dir
         _new_aep = None
-        for _root, _dirs, _files in os.walk(str(_tmp)):
+        for _root, _dirs, _files in os.walk(str(_extract)):
             for _f in _files:
                 if _f.lower().endswith(".aep"):
                     _new_aep = Path(_root) / _f
@@ -258,8 +279,7 @@ def apply_template_update(progress_cb=None) -> tuple:
             if _new_aep:
                 break
         if not _new_aep:
-            _err = (result.stderr or result.stdout or "").strip()
-            return False, f"Template (.aep) not found after download. {_err[:200]}"
+            return False, "Template (.aep) not found inside the zip."
 
         # The folder that actually contains the downloaded content
         _src_root = _new_aep.parent
@@ -277,6 +297,8 @@ def apply_template_update(progress_cb=None) -> tuple:
             pass
 
         for _entry in os.listdir(str(_src_root)):
+            if _entry == "__MACOSX" or _entry.startswith("._"):
+                continue
             _src = _src_root / _entry
             _dst = ROOT_DIR / _entry
             try:

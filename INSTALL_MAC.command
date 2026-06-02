@@ -14,6 +14,8 @@ GITHUB_OWNER="dsquash"
 GITHUB_REPO="flashscore-ratings"
 BRANCH="main"
 RAW_BASE="https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${BRANCH}"
+API_BASE="https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents"
+API_ACCEPT="Accept: application/vnd.github.raw"
 GDRIVE_FOLDER_ID="1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti"
 GDRIVE_TEMPLATE_ZIP_ID="1p65csy_J7fytJV77JVDOHs8b54XQDX8k"   # single template .zip on Drive
 
@@ -246,7 +248,7 @@ fi
 # STEP 5 — Scripts from GitHub
 # ══════════════════════════════════════════════════════════════════
 LOCAL_VER="$(cat "$SCRIPTS_DIR/version.txt" 2>/dev/null | tr -d '[:space:]')"
-REMOTE_VER="$(curl -fsSL -H "Cache-Control: no-cache" "${RAW_BASE}/version.txt?cb=$(date +%s)" 2>/dev/null | tr -d '[:space:]')"
+REMOTE_VER="$(curl -fsSL -H "$API_ACCEPT" "${API_BASE}/version.txt?ref=${BRANCH}" 2>/dev/null | tr -d '[:space:]')"
 
 FILES_OK=1
 for F in "launcher.py" "run.py" "refresh_stats.py"; do
@@ -265,19 +267,19 @@ else
         for REL in "${SCRIPT_FILES[@]}"; do
             local enc url
             enc=$(printf '%s' "$REL" | sed 's/ /%20/g')
-            url="${RAW_BASE}/${enc}?cb=$(date +%s)"
-            curl -fsSL -H "Cache-Control: no-cache" "$url" -o "$SCRIPTS_DIR/$REL" || return 1
+            url="${API_BASE}/${enc}?ref=${BRANCH}"
+            curl -fsSL -H "$API_ACCEPT" "$url" -o "$SCRIPTS_DIR/$REL" || return 1
         done
         # sofifa_overrides.json: only download if it doesn't exist (preserve user data)
         if [ ! -f "$SCRIPTS_DIR/sofifa_overrides.json" ]; then
-            curl -fsSL "${RAW_BASE}/sofifa_overrides.json" -o "$SCRIPTS_DIR/sofifa_overrides.json" 2>/dev/null || true
+            curl -fsSL -H "$API_ACCEPT" "${API_BASE}/sofifa_overrides.json?ref=${BRANCH}" -o "$SCRIPTS_DIR/sofifa_overrides.json" 2>/dev/null || true
         fi
         # Launcher files → INSTALL_DIR (root)
         for REL in "${ROOT_FILES[@]}"; do
             local enc url
             enc=$(printf '%s' "$REL" | sed 's/ /%20/g')
-            url="${RAW_BASE}/${enc}?cb=$(date +%s)"
-            curl -fsSL -H "Cache-Control: no-cache" "$url" -o "$INSTALL_DIR/$REL" || true  # non-fatal
+            url="${API_BASE}/${enc}?ref=${BRANCH}"
+            curl -fsSL -H "$API_ACCEPT" "$url" -o "$INSTALL_DIR/$REL" || true  # non-fatal
         done
         chmod +x "$INSTALL_DIR"/*.command 2>/dev/null
         return 0
@@ -320,7 +322,7 @@ else
 fi
 
 # Record the template version marker so the in-app updater tracks it
-REMOTE_TPL_VER="$(curl -fsSL -H "Cache-Control: no-cache" "${RAW_BASE}/template_version.txt?cb=$(date +%s)" 2>/dev/null | tr -d '[:space:]')"
+REMOTE_TPL_VER="$(curl -fsSL -H "$API_ACCEPT" "${API_BASE}/template_version.txt?ref=${BRANCH}" 2>/dev/null | tr -d '[:space:]')"
 [ -n "$REMOTE_TPL_VER" ] && printf '%s' "$REMOTE_TPL_VER" > "$SCRIPTS_DIR/.template_version"
 
 # ══════════════════════════════════════════════════════════════════

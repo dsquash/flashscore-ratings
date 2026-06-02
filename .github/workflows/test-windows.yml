@@ -50,6 +50,26 @@ jobs:
         shell: cmd
         run: python -c "import httpx, PIL, playwright, tkinter, ttkbootstrap, json, pathlib, subprocess, threading; print('[OK] all imports')"
 
+      - name: Test AE template download (zip via Invoke-WebRequest)
+        shell: powershell
+        run: |
+          $zipId = "1p65csy_J7fytJV77JVDOHs8b54XQDX8k"
+          $url = "https://drive.usercontent.google.com/download?id=$zipId&export=download&confirm=t"
+          $zip = "$env:TEMP\tpl_test.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+          $size = (Get-Item $zip).Length
+          Write-Host "Downloaded $size bytes"
+          if ($size -lt 100000) { Write-Error "Zip too small ($size)"; exit 1 }
+          $hdr = [System.IO.File]::ReadAllBytes($zip)[0..1]
+          if ($hdr[0] -ne 80 -or $hdr[1] -ne 75) { Write-Error "Not a zip (no PK header)"; exit 1 }
+          Expand-Archive -Path $zip -DestinationPath "$env:TEMP\tpl_out" -Force
+          $aep = "$env:TEMP\tpl_out\Match Ratings - Template.aep"
+          if (-not (Test-Path $aep)) { Write-Error "Template .aep not found after extract"; exit 1 }
+          $aepSize = (Get-Item $aep).Length
+          Write-Host "[OK] template .aep extracted ($aepSize bytes)"
+          if (-not (Test-Path "$env:TEMP\tpl_out\(Footage)")) { Write-Error "(Footage) folder missing"; exit 1 }
+          Write-Host "[OK] (Footage) assets present"
+
       - name: Test Windows path and file I/O
         shell: cmd
         run: python -c "from pathlib import Path; import sys; o=Path('flashscore_output'); o.mkdir(exist_ok=True); f=o/'ci.txt'; f.write_text('ok',encoding='utf-8'); assert f.read_text(encoding='utf-8')=='ok'; f.unlink(); o.rmdir(); assert Path(sys.executable).exists(); print('[OK] path I/O OK')"

@@ -11,6 +11,7 @@ Usage (standalone):
 Used internally by launcher.py for startup check and one-click update.
 """
 
+import os
 import sys
 import shutil
 from pathlib import Path
@@ -226,44 +227,80 @@ def check_template_update(timeout: int = 8) -> tuple:
 
 def apply_template_update(progress_cb=None) -> tuple:
     """
-    Downloads the AE template folder from Google Drive and replaces the local
-    copy directly (no backup). Returns (ok: bool, message: str).
+    Downloads the AE template from Google Drive into a temp dir, then swaps it
+    in (replacing the local copy directly, no backup). Downloading to temp first
+    means a failed/partial download never leaves you without a template.
+    Returns (ok: bool, message: str).
     """
-    if progress_cb:
-        progress_cb("Removing old template...")
-    # Direct replace: delete existing template files first
-    try:
-        if TEMPLATE_AEP.exists():
-            TEMPLATE_AEP.unlink()
-        if TEMPLATE_FOLDER.exists():
-            shutil.rmtree(str(TEMPLATE_FOLDER), ignore_errors=True)
-    except Exception:
-        pass
+    import subprocess, tempfile
 
     if progress_cb:
         progress_cb("Downloading template from Google Drive...")
-    try:
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, "-m", "gdown", "--folder", GDRIVE_FOLDER_ID,
-             "-O", str(ROOT_DIR), "--quiet"],
-            capture_output=True, text=True, timeout=600
-        )
-        if result.returncode != 0:
-            return False, f"gdown failed: {result.stderr.strip() or result.stdout.strip()}"
-    except Exception as e:
-        return False, f"Download error: {e}"
 
-    if not TEMPLATE_AEP.exists() and not TEMPLATE_FOLDER.exists():
-        return False, "Template not found after download."
-
-    # Save the new local marker so we don't re-download next time
+    _tmp = Path(tempfile.mkdtemp(prefix="fs_tpl_"))
     try:
-        remote = get_remote_template_version()
-        TEMPLATE_VERSION_FILE.write_text(remote, encoding="utf-8")
-    except Exception:
-        pass
-    return True, "Template updated."
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "gdown", "--folder", GDRIVE_FOLDER_ID,
+                 "-O", str(_tmp), "--remaining-ok", "--quiet"],
+                capture_output=True, text=True, timeout=900
+            )
+        except Exception as e:
+            return False, f"Download error: {e}"
+
+        # Locate the downloaded .aep anywhere under the temp dir
+        _new_aep = None
+        for _root, _dirs, _files in os.walk(str(_tmp)):
+            for _f in _files:
+                if _f.lower().endswith(".aep"):
+                    _new_aep = Path(_root) / _f
+                    break
+            if _new_aep:
+                break
+        if not _new_aep:
+            _err = (result.stderr or result.stdout or "").strip()
+            return False, f"Template (.aep) not found after download. {_err[:200]}"
+
+        # The folder that actually contains the downloaded content
+        _src_root = _new_aep.parent
+
+        if progress_cb:
+            progress_cb("Installing new template...")
+
+        # Direct replace: remove old template, then move new files in
+        try:
+            if TEMPLATE_AEP.exists():
+                TEMPLATE_AEP.unlink()
+            if TEMPLATE_FOLDER.exists():
+                shutil.rmtree(str(TEMPLATE_FOLDER), ignore_errors=True)
+        except Exception:
+            pass
+
+        for _entry in os.listdir(str(_src_root)):
+            _src = _src_root / _entry
+            _dst = ROOT_DIR / _entry
+            try:
+                if _dst.exists():
+                    if _dst.is_dir():
+                        shutil.rmtree(str(_dst), ignore_errors=True)
+                    else:
+                        _dst.unlink()
+                shutil.move(str(_src), str(_dst))
+            except Exception:
+                pass
+
+        if not TEMPLATE_AEP.exists():
+            return False, "Template install failed (.aep missing after move)."
+
+        # Save the new local marker so we don't re-download next time
+        try:
+            remote = get_remote_template_version()
+            TEMPLATE_VERSION_FILE.write_text(remote, encoding="utf-8")
+        except Exception:
+            pass
+        return True, "Template updated."
+    finally:
+        shutil.rmtree(str(_tmp), ignore_errors=True)
 
 
 # ── Apply update ──────────────────────────────────────────────────

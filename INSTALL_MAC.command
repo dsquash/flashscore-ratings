@@ -298,7 +298,7 @@ if [ -f "$TEMPLATE_AEP" ] || [ -d "$TEMPLATE_FOLDER" ]; then
     skip "After Effects template"
 else
     fetch_template() {
-        "$PY_BIN" -m gdown --folder "$GDRIVE_FOLDER_ID" -O "$INSTALL_DIR" --remaining-ok --quiet
+        "$PY_BIN" -m gdown --folder "$GDRIVE_FOLDER_ID" -O "$INSTALL_DIR" --quiet
     }
     if ! run_step "Downloading After Effects template" fetch_template; then
         info "Template download failed — download manually from Google Drive if needed."

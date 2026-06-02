@@ -242,7 +242,7 @@ def apply_template_update(progress_cb=None) -> tuple:
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "gdown", "--folder", GDRIVE_FOLDER_ID,
-                 "-O", str(_tmp), "--remaining-ok", "--quiet"],
+                 "-O", str(_tmp), "--quiet"],
                 capture_output=True, text=True, timeout=900
             )
         except Exception as e:

@@ -245,7 +245,7 @@ fi
 # STEP 5 — Scripts from GitHub
 # ══════════════════════════════════════════════════════════════════
 LOCAL_VER="$(cat "$SCRIPTS_DIR/version.txt" 2>/dev/null | tr -d '[:space:]')"
-REMOTE_VER="$(curl -fsSL "${RAW_BASE}/version.txt" 2>/dev/null | tr -d '[:space:]')"
+REMOTE_VER="$(curl -fsSL -H "Cache-Control: no-cache" "${RAW_BASE}/version.txt?cb=$(date +%s)" 2>/dev/null | tr -d '[:space:]')"
 
 FILES_OK=1
 for F in "launcher.py" "run.py" "refresh_stats.py"; do
@@ -264,8 +264,8 @@ else
         for REL in "${SCRIPT_FILES[@]}"; do
             local enc url
             enc=$(printf '%s' "$REL" | sed 's/ /%20/g')
-            url="${RAW_BASE}/${enc}"
-            curl -fsSL "$url" -o "$SCRIPTS_DIR/$REL" || return 1
+            url="${RAW_BASE}/${enc}?cb=$(date +%s)"
+            curl -fsSL -H "Cache-Control: no-cache" "$url" -o "$SCRIPTS_DIR/$REL" || return 1
         done
         # sofifa_overrides.json: only download if it doesn't exist (preserve user data)
         if [ ! -f "$SCRIPTS_DIR/sofifa_overrides.json" ]; then
@@ -275,8 +275,8 @@ else
         for REL in "${ROOT_FILES[@]}"; do
             local enc url
             enc=$(printf '%s' "$REL" | sed 's/ /%20/g')
-            url="${RAW_BASE}/${enc}"
-            curl -fsSL "$url" -o "$INSTALL_DIR/$REL" || true  # non-fatal
+            url="${RAW_BASE}/${enc}?cb=$(date +%s)"
+            curl -fsSL -H "Cache-Control: no-cache" "$url" -o "$INSTALL_DIR/$REL" || true  # non-fatal
         done
         chmod +x "$INSTALL_DIR"/*.command 2>/dev/null
         return 0
@@ -306,7 +306,7 @@ else
 fi
 
 # Record the template version marker so the in-app updater tracks it
-REMOTE_TPL_VER="$(curl -fsSL "${RAW_BASE}/template_version.txt" 2>/dev/null | tr -d '[:space:]')"
+REMOTE_TPL_VER="$(curl -fsSL -H "Cache-Control: no-cache" "${RAW_BASE}/template_version.txt?cb=$(date +%s)" 2>/dev/null | tr -d '[:space:]')"
 [ -n "$REMOTE_TPL_VER" ] && printf '%s' "$REMOTE_TPL_VER" > "$SCRIPTS_DIR/.template_version"
 
 # ══════════════════════════════════════════════════════════════════

@@ -301,11 +301,17 @@ else
     fetch_template() {
         [ -z "$GDRIVE_TEMPLATE_ZIP_ID" ] && return 1
         local zip="$INSTALL_DIR/.template_dl.zip"
-        "$PY_BIN" -m gdown "$GDRIVE_TEMPLATE_ZIP_ID" -O "$zip" --quiet || return 1
+        # Direct HTTP download (reliable; gdown is flaky here). &confirm=t bypasses
+        # the Drive virus-scan interstitial for larger files.
+        curl -fsSL "https://drive.usercontent.google.com/download?id=${GDRIVE_TEMPLATE_ZIP_ID}&export=download&confirm=t" -o "$zip" || return 1
         [ -f "$zip" ] || return 1
+        # Verify it is a real zip (PK header), not an HTML page
+        head -c2 "$zip" | grep -q "PK" || { rm -f "$zip"; return 1; }
         # Unzip into INSTALL_DIR (overwrites)
         ditto -x -k "$zip" "$INSTALL_DIR" 2>/dev/null || unzip -o -q "$zip" -d "$INSTALL_DIR" || return 1
         rm -f "$zip"
+        # Clean up macOS zip junk
+        rm -rf "$INSTALL_DIR/__MACOSX" 2>/dev/null
         [ -f "$TEMPLATE_AEP" ]
     }
     if ! run_step "Downloading After Effects template" fetch_template; then

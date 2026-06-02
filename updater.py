@@ -245,20 +245,27 @@ def apply_template_update(progress_cb=None) -> tuple:
     _tmp = Path(tempfile.mkdtemp(prefix="fs_tpl_"))
     try:
         _zip_path = _tmp / "template.zip"
-        # Single-file download (1 request, no folder throttling). gdown handles
-        # the Drive virus-scan confirm token automatically.
+        # Direct HTTP download (proven reliable; gdown is flaky/throttled here).
+        # &confirm=t bypasses Drive's virus-scan interstitial for larger files.
+        _url = (f"https://drive.usercontent.google.com/download?id={GDRIVE_TEMPLATE_ZIP_ID}"
+                f"&export=download&confirm=t")
         try:
-            result = subprocess.run(
-                [sys.executable, "-m", "gdown", GDRIVE_TEMPLATE_ZIP_ID,
-                 "-O", str(_zip_path), "--quiet"],
-                capture_output=True, text=True, timeout=900
-            )
+            import urllib.request
+            _req = urllib.request.Request(_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(_req, timeout=600) as _r, open(str(_zip_path), "wb") as _out:
+                shutil.copyfileobj(_r, _out)
         except Exception as e:
             return False, f"Download error: {e}"
 
         if not _zip_path.exists() or _zip_path.stat().st_size < 1000:
-            _err = (result.stderr or result.stdout or "").strip()
-            return False, f"Zip download failed. {_err[:200]}"
+            return False, "Zip download failed (empty file)."
+        # Verify it's really a zip (PK header), not an HTML error/confirm page
+        try:
+            with open(str(_zip_path), "rb") as _hf:
+                if _hf.read(2) != b"PK":
+                    return False, "Downloaded file is not a zip (Drive returned a page)."
+        except Exception:
+            return False, "Could not read downloaded file."
 
         if progress_cb:
             progress_cb("Extracting template...")

@@ -305,6 +305,10 @@ else
     fi
 fi
 
+# Record the template version marker so the in-app updater tracks it
+REMOTE_TPL_VER="$(curl -fsSL "${RAW_BASE}/template_version.txt" 2>/dev/null | tr -d '[:space:]')"
+[ -n "$REMOTE_TPL_VER" ] && printf '%s' "$REMOTE_TPL_VER" > "$SCRIPTS_DIR/.template_version"
+
 # ══════════════════════════════════════════════════════════════════
 # STEP 7 — Write config file for Lineup Panel.jsx
 # Tells the AE panel where _DO NOT TOUCH_/ is, regardless of where

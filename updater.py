@@ -36,6 +36,12 @@ BRANCH       = "main"
 
 RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{BRANCH}"
 
+# ── After Effects template (Google Drive) ─────────────────────────
+GDRIVE_FOLDER_ID      = "1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti"
+TEMPLATE_VERSION_FILE = BASE_DIR / ".template_version"   # local marker
+TEMPLATE_AEP          = ROOT_DIR / "Match Ratings - Template.aep"
+TEMPLATE_FOLDER       = ROOT_DIR / "Match Ratings - Template folder"
+
 # Files common to all platforms
 _COMMON_FILES = [
     "launcher.py",
@@ -177,6 +183,87 @@ def check_for_update(timeout: int = 8) -> tuple:
         return _version_gt(remote, local), local, remote
     except Exception:
         return False, local, "?"
+
+
+# ── After Effects template version ────────────────────────────────
+
+def get_local_template_version() -> str:
+    try:
+        return TEMPLATE_VERSION_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        return "0"
+
+
+def get_remote_template_version() -> str:
+    # GitHub API (fresh) with cache-busted raw CDN fallback
+    try:
+        return _fetch_file_via_api("template_version.txt").decode("utf-8").strip()
+    except Exception:
+        return _fetch_url(f"{RAW_BASE}/template_version.txt").decode("utf-8").strip()
+
+
+def check_template_update(timeout: int = 8) -> tuple:
+    """
+    Returns (update_available: bool, local: str, remote: str).
+    Update available when the remote template marker differs from the local one.
+    """
+    local = get_local_template_version()
+    try:
+        remote = get_remote_template_version()
+    except Exception:
+        return False, local, "?"
+    # Auto-heal: existing install has the template but no local marker yet.
+    # Adopt the current remote version silently so we DON'T wipe the user's
+    # working template on first run. Only a later bump triggers a real update.
+    if local == "0" and (TEMPLATE_AEP.exists() or TEMPLATE_FOLDER.exists()):
+        try:
+            TEMPLATE_VERSION_FILE.write_text(remote, encoding="utf-8")
+        except Exception:
+            pass
+        return False, remote, remote
+    return (remote != local and remote not in ("", "?")), local, remote
+
+
+def apply_template_update(progress_cb=None) -> tuple:
+    """
+    Downloads the AE template folder from Google Drive and replaces the local
+    copy directly (no backup). Returns (ok: bool, message: str).
+    """
+    if progress_cb:
+        progress_cb("Removing old template...")
+    # Direct replace: delete existing template files first
+    try:
+        if TEMPLATE_AEP.exists():
+            TEMPLATE_AEP.unlink()
+        if TEMPLATE_FOLDER.exists():
+            shutil.rmtree(str(TEMPLATE_FOLDER), ignore_errors=True)
+    except Exception:
+        pass
+
+    if progress_cb:
+        progress_cb("Downloading template from Google Drive...")
+    try:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "-m", "gdown", "--folder", GDRIVE_FOLDER_ID,
+             "-O", str(ROOT_DIR), "--quiet"],
+            capture_output=True, text=True, timeout=600
+        )
+        if result.returncode != 0:
+            return False, f"gdown failed: {result.stderr.strip() or result.stdout.strip()}"
+    except Exception as e:
+        return False, f"Download error: {e}"
+
+    if not TEMPLATE_AEP.exists() and not TEMPLATE_FOLDER.exists():
+        return False, "Template not found after download."
+
+    # Save the new local marker so we don't re-download next time
+    try:
+        remote = get_remote_template_version()
+        TEMPLATE_VERSION_FILE.write_text(remote, encoding="utf-8")
+    except Exception:
+        pass
+    return True, "Template updated."
 
 
 # ── Apply update ──────────────────────────────────────────────────

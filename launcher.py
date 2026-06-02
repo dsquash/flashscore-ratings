@@ -131,6 +131,8 @@ class App(_BASE_CLS):
         self._running         = False
         self._missing_players = []
         self._update_banner   = None
+        self._code_update     = (False, "", "")
+        self._tpl_update_available = False
 
         self._build_ui()
         self._load_state()
@@ -635,18 +637,30 @@ class App(_BASE_CLS):
     def _bg_update_check(self):
         try:
             import updater
-            available, local, remote = updater.check_for_update(timeout=8)
-            if available:
-                self.after(0, self._show_update_banner, local, remote)
+            c_avail, c_local, c_remote = updater.check_for_update(timeout=8)
+            try:
+                t_avail, _tl, _tr = updater.check_template_update(timeout=8)
+            except Exception:
+                t_avail = False
+            if c_avail or t_avail:
+                self.after(0, self._show_update_banner, c_avail, c_local, c_remote, t_avail)
         except Exception:
             pass
 
-    def _show_update_banner(self, local: str, remote: str):
+    def _show_update_banner(self, code_avail: bool, local: str, remote: str, tpl_avail: bool = False):
+        self._code_update = (code_avail, local, remote)
+        self._tpl_update_available = tpl_avail
         if self._update_banner:
             self._update_banner.destroy()
         banner = ttk.Frame(self, padding=(PAD, 4, PAD, 4))
         self._update_banner = banner
-        ttk.Label(banner, text=f"⬆  Update available: v{local}  →  v{remote}",
+        if code_avail and tpl_avail:
+            txt = f"⬆  Update available: v{local}  →  v{remote}   (+ AE template)"
+        elif code_avail:
+            txt = f"⬆  Update available: v{local}  →  v{remote}"
+        else:
+            txt = "⬆  After Effects template update available"
+        ttk.Label(banner, text=txt,
                   font=(UI, 11), foreground="#30d158").pack(side="left")
         ttk.Button(banner, text="Update now",
                    command=lambda: self._do_update(remote),
@@ -665,23 +679,32 @@ class App(_BASE_CLS):
             try:
                 import updater
                 available, local, remote = updater.check_for_update(timeout=12)
+                try:
+                    t_avail, _tl, _tr = updater.check_template_update(timeout=12)
+                except Exception:
+                    t_avail = False
             except Exception as e:
-                self.after(0, lambda: self._update_check_result(False, "?", "?", str(e)))
+                self.after(0, lambda: self._update_check_result(False, "?", "?", str(e), False))
                 return
-            self.after(0, lambda: self._update_check_result(available, local, remote))
+            self.after(0, lambda: self._update_check_result(available, local, remote, "", t_avail))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _update_check_result(self, available: bool, local: str, remote: str, error: str = ""):
+    def _update_check_result(self, available: bool, local: str, remote: str, error: str = "", tpl_avail: bool = False):
         self.btn_check_update.state(["!disabled"])
         try: self.btn_check_update.configure(text="Check for Updates")
         except Exception: pass
         if error:
             self.status_var.set(f"Update check failed: {error}")
             return
-        if available:
-            self._show_update_banner(local, remote)
-            self.status_var.set(f"⬆ Update available: v{local} → v{remote}")
+        if available or tpl_avail:
+            self._show_update_banner(available, local, remote, tpl_avail)
+            if available and tpl_avail:
+                self.status_var.set(f"⬆ Update available: v{local} → v{remote} (+ template)")
+            elif available:
+                self.status_var.set(f"⬆ Update available: v{local} → v{remote}")
+            else:
+                self.status_var.set("⬆ After Effects template update available")
         else:
             msg = "Could not reach GitHub." if remote == "?" else f"✓ Already up to date (v{local})."
             self.status_var.set(msg)
@@ -691,10 +714,16 @@ class App(_BASE_CLS):
         if self._running:
             mb.showwarning("Update", "Please stop the current run before updating.")
             return
+        code_avail = self._code_update[0]
+        tpl_avail  = self._tpl_update_available
+        _what = []
+        if code_avail: _what.append(f"app files (v{remote})")
+        if tpl_avail:  _what.append("After Effects template")
         ok = mb.askyesno("Update",
-                         f"Download and install v{remote}?\n\n"
-                         "App files will be replaced. Match data and overrides are safe.\n\n"
-                         "Restart required after update.", icon="question")
+                         "Download and install:\n  • " + "\n  • ".join(_what) +
+                         "\n\nMatch data and overrides are safe."
+                         + ("\n\nThe AE template will be replaced directly." if tpl_avail else "")
+                         + "\n\nRestart required after update.", icon="question")
         if not ok:
             return
 
@@ -716,24 +745,47 @@ class App(_BASE_CLS):
         def worker():
             try:
                 import updater
-                def on_progress(current, total, name, ok):
-                    status = "✓" if ok else "✗"
-                    self.after(0, progress_var.set, f"[{current}/{total}] {status}  {name}")
-                updated, failed, _ = updater.apply_update(on_progress)
+                updated, failed = [], []
+                if code_avail:
+                    def on_progress(current, total, name, ok):
+                        status = "✓" if ok else "✗"
+                        self.after(0, progress_var.set, f"[{current}/{total}] {status}  {name}")
+                    updated, failed, _ = updater.apply_update(on_progress)
+
+                tpl_line = ""
+                if tpl_avail:
+                    self.after(0, progress_var.set, "Updating After Effects template...")
+                    tok, tmsg = updater.apply_template_update(
+                        lambda m: self.after(0, progress_var.set, m))
+                    tpl_line = "✓ AE template updated." if tok else f"⚠ Template update failed: {tmsg}"
+
                 self.after(0, prog_win.destroy)
-                lines = [f"✓ Updated {len(updated)} file(s)."]
-                if failed:
-                    lines.append(f"\n⚠ {len(failed)} file(s) failed.")
-                lines.append("\n\nThe app will now close. Please reopen it.")
+                lines = []
+                if code_avail:
+                    lines.append(f"✓ Updated {len(updated)} file(s).")
+                    if failed:
+                        lines.append(f"⚠ {len(failed)} file(s) failed.")
+                if tpl_line:
+                    lines.append(tpl_line)
+                # Restart needed only if app files changed
+                if code_avail:
+                    lines.append("\nThe app will now close. Please reopen it.")
                 msg = "\n".join(lines)
-                fn = mb.showwarning if failed else mb.showinfo
+                fn = mb.showwarning if (failed or (tpl_avail and "failed" in tpl_line)) else mb.showinfo
 
-                def _show_and_quit():
-                    fn(f"Update v{remote}", msg)
-                    self.destroy()
+                def _finish():
+                    fn("Update", msg)
+                    if code_avail:
+                        self.destroy()
+                    else:
+                        if self._update_banner:
+                            self._update_banner.destroy()
+                            self._update_banner = None
+                        self._tpl_update_available = False
+                        self.status_var.set("✓ Template updated.")
 
-                self.after(0, _show_and_quit)
-                if self._update_banner:
+                self.after(0, _finish)
+                if self._update_banner and code_avail:
                     self._update_banner = None
             except Exception as e:
                 self.after(0, prog_win.destroy)

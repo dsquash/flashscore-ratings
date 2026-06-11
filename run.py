@@ -1096,8 +1096,9 @@ def _parse_sofascore_event_id(url: str) -> str:
 
 async def _fetch_sofascore_lineup(page, event_id: str) -> tuple:
     """
-    Descarca lineup-ul unui meci Sofascore navigand pe URL-ul API cu page.goto.
-    (ctx.request primeste 403 de la Sofascore; page.goto ca document trece.)
+    Descarca lineup-ul unui meci Sofascore.
+    Navigheaza pe www.sofascore.com intai (trece JS challenge/cookies),
+    apoi face fetch() din contextul paginii catre API (mosteneste cookies/sesiune).
     Returneaza (home_map, away_map) unde fiecare map e {normalized_name: player_id}.
     """
     if not event_id:
@@ -1105,11 +1106,36 @@ async def _fetch_sofascore_lineup(page, event_id: str) -> tuple:
     try:
         import json as _json_ll
         _api_url = f"https://api.sofascore.com/api/v1/event/{event_id}/lineups"
-        _resp = await page.goto(_api_url, wait_until="load", timeout=20000)
-        if not _resp or not _resp.ok:
-            print(f"  ⚠ Sofascore lineup: HTTP {_resp.status if _resp else 'none'}")
+        # Viziteaza site-ul mai intai ca sa treaca verificarile Cloudflare/JS
+        try:
+            await page.goto("https://www.sofascore.com/", wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_timeout(1500)
+        except Exception:
+            pass
+        # Fetch API din contextul JS al paginii (mosteneste cookies si sesiunea)
+        _txt = await page.evaluate(f"""async () => {{
+            try {{
+                const r = await fetch("{_api_url}", {{
+                    method: "GET",
+                    headers: {{
+                        "Accept": "application/json, text/plain, */*",
+                        "x-requested-with": "XMLHttpRequest",
+                        "Referer": "https://www.sofascore.com/"
+                    }}
+                }});
+                if (!r.ok) return JSON.stringify({{_error: r.status}});
+                return await r.text();
+            }} catch(e) {{
+                return JSON.stringify({{_error: String(e)}});
+            }}
+        }}""")
+        _data_check = _json_ll.loads(_txt)
+        if isinstance(_data_check, dict) and "_error" in _data_check:
+            print(f"  ⚠ Sofascore lineup: HTTP {_data_check['_error']}")
             return {}, {}
-        _txt = await _resp.text()
+        _data = _data_check
+        if not isinstance(_data, dict):
+            _data = _json_ll.loads(_txt)
         _data = _json_ll.loads(_txt)
         
         def _build_map(side_data):
@@ -1443,9 +1469,6 @@ def save_image(raw: bytes, path: Path) -> bool:
             img = Image.open(io.BytesIO(raw)).convert("RGBA")
             if img.width < 10:
                 return False
-            # Upscale la 240px daca e prea mic (ex: thumbnail Flashscore)
-            if img.width < 200 or img.height < 200:
-                img = img.resize((240, 240), Image.LANCZOS)
             img.save(str(path), format="PNG")
             return True
         except Exception:

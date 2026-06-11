@@ -438,7 +438,8 @@ def scrape_flashscore(url: str) -> dict:
                 if (imgEl) {
                     imgSrc = imgEl.src || "";
                     if (!imgSrc && imgEl.getAttribute("srcset")) {
-                        imgSrc = imgEl.getAttribute("srcset").split(",")[0].trim().split(" ")[0];
+                        const srcsetParts = imgEl.getAttribute("srcset").split(",");
+                        imgSrc = srcsetParts[srcsetParts.length - 1].trim().split(" ")[0];
                     }
                 }
 
@@ -1442,6 +1443,9 @@ def save_image(raw: bytes, path: Path) -> bool:
             img = Image.open(io.BytesIO(raw)).convert("RGBA")
             if img.width < 10:
                 return False
+            # Upscale la 240px daca e prea mic (ex: thumbnail Flashscore)
+            if img.width < 200 or img.height < 200:
+                img = img.resize((240, 240), Image.LANCZOS)
             img.save(str(path), format="PNG")
             return True
         except Exception:

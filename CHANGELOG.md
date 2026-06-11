@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.56
+- Photos: ia cea mai mare varianta din srcset (in loc de prima/cea mai mica)
+- Photos: upscale automat la 240x240 cu LANCZOS daca poza e sub 200px (ex: thumbnailuri Flashscore)
+
 ## v1.0.55
 - Browser: headless=True — browserul nu mai apare vizibil
 

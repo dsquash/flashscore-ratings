@@ -53,3 +53,13 @@
 - SoFIFA overrides: manually map player names to SoFIFA profile URLs
 - After Effects panel: Populate / Reset / Save State / Refresh Stats / Render to AME
 - Auto-updater: one-click updates from GitHub
+
+## v1.0.64
+- Photos: srcset ia cea mai mare variantă disponibilă (rezoluție maximă)
+- Photos: upscale automat la 240x240 dacă poza e sub 200px
+- Browser: headless (fără fereastră vizibilă)
+- Search: alias-uri echipe naționale (Czech Republic→czechia, Republic of Ireland→ireland etc.)
+- Search: urllib.request în loc de httpx pentru fetch pagina SoFIFA (httpx blocat de Cloudflare)
+- Search: încearcă URL original + /customized ca fallback
+- Updater: fix URL encoding pentru fișiere cu spații în nume (Lineup Panel.jsx, START HERE.bat)
+- Erori rețea: mesaje clare în română (ERR_NAME_NOT_RESOLVED, timeout etc.)

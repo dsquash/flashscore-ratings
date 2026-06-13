@@ -62,13 +62,27 @@ def send(
     }
 
     try:
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
+        _body = json.dumps(payload).encode("utf-8")
+
+        # Google Apps Script /exec face redirect 302.
+        # urllib urmărește redirect-ul dar schimbă POST→GET (pierde body-ul).
+        # Fix: redirect handler custom care păstrează POST + body.
+        class _KeepPost(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return urllib.request.Request(
+                    newurl,
+                    data=req.data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+
+        _opener = urllib.request.build_opener(_KeepPost)
+        _req = urllib.request.Request(
             TELEMETRY_URL,
-            data=data,
+            data=_body,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=6)
+        _opener.open(_req, timeout=8)
     except Exception:
         pass  # Telemetria nu trebuie sa blocheze niciodata aplicatia

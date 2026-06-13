@@ -50,6 +50,7 @@ _COMMON_FILES = [
     "run.py",
     "refresh_stats.py",
     "updater.py",
+    "telemetry.py",
     "populate_lineup.jsx",
     "reset_lineup.jsx",
     "refresh_comps.jsx",

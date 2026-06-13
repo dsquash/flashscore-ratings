@@ -1787,6 +1787,9 @@ def main():
     print(f"  FLASHSCORE RATINGS — run.py  (v{_ver})")
     print("=" * 55)
 
+    import time as _time_run
+    _run_start = _time_run.time()
+
     if images_only:
         # Mod rapid: sare peste scraping, incarca data.json existent
         data_path = OUTPUT_DIR / "data.json"
@@ -1837,6 +1840,30 @@ def main():
     Open .aep and run populate_lineup.jsx
 {"=" * 55}
 """)
+
+    # ── Telemetrie ────────────────────────────────────────────────
+    try:
+        import telemetry as _tel
+        # Calculeaza statistici din data.json
+        _all_players = (
+            data["home"]["players"] + data["away"]["players"] +
+            data["home"]["substitutes"] + data["away"]["substitutes"]
+        )
+        _ok  = sum(1 for p in _all_players if p.get("photo_source") not in ("", None, "placeholder"))
+        _nf  = sum(1 for p in _all_players if p.get("photo_source") in ("", None, "placeholder"))
+        _errs = [p["name"] for p in _all_players if p.get("photo_source") in ("", None, "placeholder")]
+        _url_used = "" if images_only else (args[0] if args else "")
+        _tel.send(
+            event="run",
+            flashscore_url=_url_used,
+            sofascore_url=sofascore_url,
+            players_ok=_ok,
+            players_not_found=_nf,
+            errors=_errs,
+            duration_sec=_time_run.time() - _run_start,
+        )
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

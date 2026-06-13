@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 # ── Configureaza URL-ul Google Apps Script (inlocuieste dupa deploy) ──
-TELEMETRY_URL = "https://script.google.com/macros/s/INLOCUIESTE_CU_URL_TAU/exec"
+TELEMETRY_URL = "https://script.google.com/macros/s/AKfycbyfOpPe3F-JiWuhw3g82ID8-vwFrHYiIG2CWX3mMnx2S5jLc2CdltOcQ2moYkf11Z7p/exec"
 
 
 def _get_version() -> str:

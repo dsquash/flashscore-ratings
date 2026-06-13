@@ -1,19 +1,19 @@
 """
-telemetry.py — Trimite un rezumat al fiecarui run catre Google Sheets.
-Se apeleaza la finalul run.py si refresh_stats.py.
-Daca URL-ul nu e configurat sau reteaua lipseste, nu afecteaza aplicatia.
+telemetry.py — Trimite notificari Pushover dupa fiecare run/refresh.
+Nu blocheaza niciodata aplicatia daca reteaua lipseste.
 """
 
 import json
 import platform
 import socket
-import sys
 import urllib.request
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-# ── Configureaza URL-ul Google Apps Script (inlocuieste dupa deploy) ──
-TELEMETRY_URL = "https://script.google.com/macros/s/AKfycbyfOpPe3F-JiWuhw3g82ID8-vwFrHYiIG2CWX3mMnx2S5jLc2CdltOcQ2moYkf11Z7p/exec"
+_PUSHOVER_API = "https://api.pushover.net/1/messages.json"
+_TOKEN = "afswgjonby544etrs33u55zhk9wp5w"
+_USER  = "uevms5jfh4h8y5txjgey3rzzy5gsoo"
 
 
 def _get_version() -> str:
@@ -31,7 +31,7 @@ def _get_hostname() -> str:
 
 
 def send(
-    event: str,                    # "run" / "refresh"
+    event: str,
     flashscore_url: str = "",
     sofascore_url: str = "",
     players_ok: int = 0,
@@ -41,48 +41,48 @@ def send(
     extra: dict = None,
 ):
     """
-    Trimite telemetrie la Google Sheets. Nu ridica exceptii niciodata.
+    Trimite notificare Pushover. Nu ridica exceptii niciodata.
     """
-    if "INLOCUIESTE" in TELEMETRY_URL:
-        return  # URL neconfigurat — skip
-
-    payload = {
-        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        "event": event,
-        "platform": f"{platform.system()} {platform.release()}",
-        "version": _get_version(),
-        "hostname": _get_hostname(),
-        "flashscore_url": flashscore_url,
-        "sofascore_url": sofascore_url,
-        "players_ok": players_ok,
-        "players_not_found": players_not_found,
-        "errors": "; ".join(errors or [])[:500],
-        "duration_sec": round(duration_sec, 1),
-        **(extra or {}),
-    }
-
     try:
-        _body = json.dumps(payload).encode("utf-8")
+        _host = _get_hostname()
+        _ver  = _get_version()
+        _os   = platform.system()
 
-        # Google Apps Script /exec face redirect 302.
-        # urllib urmărește redirect-ul dar schimbă POST→GET (pierde body-ul).
-        # Fix: redirect handler custom care păstrează POST + body.
-        class _KeepPost(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, req, fp, code, msg, headers, newurl):
-                return urllib.request.Request(
-                    newurl,
-                    data=req.data,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
+        if event == "run":
+            _title = f"✅ Full Run OK — {_host}"
+            if players_not_found > 0:
+                _title = f"⚠️ Full Run — {players_not_found} negasiti — {_host}"
+            _lines = [
+                f"v{_ver} | {_os} | {int(duration_sec)}s",
+                f"Jucatori: {players_ok} OK / {players_not_found} negasiti",
+            ]
+            if flashscore_url:
+                _lines.append(f"Flashscore: {flashscore_url[-60:]}")
+            if errors:
+                _lines.append(f"Negasiti: {', '.join(errors[:5])}")
+                if len(errors) > 5:
+                    _lines.append(f"  ... si inca {len(errors)-5}")
+        elif event == "refresh":
+            _title = f"🔄 Refresh Stats — {_host}"
+            _lines = [
+                f"v{_ver} | {_os}",
+                f"Jucatori: {players_ok} OK / {players_not_found} negasiti",
+            ]
+        else:
+            _title = f"Flashscore — {event} — {_host}"
+            _lines = [f"v{_ver} | {_os}"]
 
-        _opener = urllib.request.build_opener(_KeepPost)
-        _req = urllib.request.Request(
-            TELEMETRY_URL,
-            data=_body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        _opener.open(_req, timeout=8)
+        _msg = "\n".join(_lines)
+
+        _data = urllib.parse.urlencode({
+            "token":   _TOKEN,
+            "user":    _USER,
+            "title":   _title,
+            "message": _msg,
+            "priority": 0,
+        }).encode()
+
+        _req = urllib.request.Request(_PUSHOVER_API, data=_data)
+        urllib.request.urlopen(_req, timeout=8)
     except Exception:
-        pass  # Telemetria nu trebuie sa blocheze niciodata aplicatia
+        pass

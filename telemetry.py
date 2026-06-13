@@ -79,6 +79,11 @@ def send(
                 _lines.append("✓ SofaScore lineup OK")
             elif _ss_ok is False and sofascore_url:
                 _lines.append("✗ SofaScore lineup FAILED")
+            # Linkuri meciuri
+            if flashscore_url:
+                _lines.append(f"FS: {flashscore_url}")
+            if sofascore_url:
+                _lines.append(f"SS: {sofascore_url}")
             # Jucatori negasiti
             if errors:
                 _lines.append(f"Negasite: {', '.join(errors[:8])}")

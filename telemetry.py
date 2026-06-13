@@ -48,20 +48,23 @@ def send(
         _ver  = _get_version()
         _os   = platform.system()
 
+        _match    = (extra or {}).get("match", "")
+        _form     = (extra or {}).get("formations", "")
+
         if event == "run":
-            _title = f"✅ Full Run OK — {_host}"
+            _title = f"✅ {_match or 'Full Run'} — {_host}"
             if players_not_found > 0:
-                _title = f"⚠️ Full Run — {players_not_found} negasiti — {_host}"
+                _title = f"⚠️ {_match or 'Full Run'} — {players_not_found} negasiti — {_host}"
             _lines = [
                 f"v{_ver} | {_os} | {int(duration_sec)}s",
-                f"Jucatori: {players_ok} OK / {players_not_found} negasiti",
             ]
-            if flashscore_url:
-                _lines.append(f"Flashscore: {flashscore_url[-60:]}")
+            if _form:
+                _lines.append(_form)
+            _lines.append(f"Poze: {players_ok} OK / {players_not_found} negasite")
             if errors:
-                _lines.append(f"Negasiti: {', '.join(errors[:5])}")
-                if len(errors) > 5:
-                    _lines.append(f"  ... si inca {len(errors)-5}")
+                _lines.append(f"Negasite: {', '.join(errors[:8])}")
+                if len(errors) > 8:
+                    _lines.append(f"  ... +{len(errors)-8} altii")
         elif event == "refresh":
             _title = f"🔄 Refresh Stats — {_host}"
             _lines = [

@@ -1739,6 +1739,8 @@ async def download_all_images(data: dict, images_only: bool = False,
     if missing:
         print(f"      Missing: {', '.join(missing)}")
 
+    return ok, fail, missing
+
 
 # ══════════════════════════════════════════════════════════════
 #  MAIN
@@ -1812,9 +1814,10 @@ def main():
             return
 
     # 2. Download imagini
-    asyncio.run(download_all_images(data, images_only=images_only,
-                                    player_only=player_only,
-                                    sofascore_url=sofascore_url))
+    _dl_ok, _dl_fail, _dl_missing = asyncio.run(
+        download_all_images(data, images_only=images_only,
+                            player_only=player_only,
+                            sofascore_url=sofascore_url))
 
     # 3. Curata img_src din data.json final (nu e nevoie in AE)
     for group in [data["home"]["players"], data["away"]["players"],
@@ -1844,23 +1847,19 @@ def main():
     # ── Telemetrie ────────────────────────────────────────────────
     try:
         import telemetry as _tel
-        # Calculeaza statistici din data.json
-        _all_players = (
-            data["home"]["players"] + data["away"]["players"] +
-            data["home"]["substitutes"] + data["away"]["substitutes"]
-        )
-        _ok  = sum(1 for p in _all_players if p.get("photo_source") not in ("", None, "placeholder"))
-        _nf  = sum(1 for p in _all_players if p.get("photo_source") in ("", None, "placeholder"))
-        _errs = [p["name"] for p in _all_players if p.get("photo_source") in ("", None, "placeholder")]
-        _url_used = "" if images_only else (args[0] if args else "")
+        _m = data.get("match", {})
         _tel.send(
             event="run",
-            flashscore_url=_url_used,
+            flashscore_url="" if images_only else (args[0] if args else ""),
             sofascore_url=sofascore_url,
-            players_ok=_ok,
-            players_not_found=_nf,
-            errors=_errs,
+            players_ok=_dl_ok,
+            players_not_found=_dl_fail,
+            errors=_dl_missing,
             duration_sec=_time_run.time() - _run_start,
+            extra={
+                "match": f"{_m.get('home_team','')} {_m.get('home_score','')} - {_m.get('away_score','')} {_m.get('away_team','')}",
+                "formations": f"{_m.get('home_formation','')} vs {_m.get('away_formation','')}",
+            },
         )
     except Exception:
         pass

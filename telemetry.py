@@ -48,19 +48,38 @@ def send(
         _ver  = _get_version()
         _os   = platform.system()
 
-        _match    = (extra or {}).get("match", "")
-        _form     = (extra or {}).get("formations", "")
+        _ex       = extra or {}
+        _match    = _ex.get("match", "")
+        _form     = _ex.get("formations", "")
+        _sources  = _ex.get("sources", {})   # {"photo": N, "flashscore": N, "sofifa": N}
+        _ss_ok    = _ex.get("ss_lineup_ok", None)
 
         if event == "run":
             _title = f"✅ {_match or 'Full Run'} — {_host}"
             if players_not_found > 0:
-                _title = f"⚠️ {_match or 'Full Run'} — {players_not_found} negasiti — {_host}"
+                _title = f"⚠️ {_match or 'Full Run'} — {players_not_found} negasite — {_host}"
             _lines = [
                 f"v{_ver} | {_os} | {int(duration_sec)}s",
             ]
             if _form:
                 _lines.append(_form)
-            _lines.append(f"Poze: {players_ok} OK / {players_not_found} negasite")
+            # Surse poze
+            _src_parts = []
+            if _sources.get("photo"):
+                _src_parts.append(f"SofaScore: {_sources['photo']}")
+            if _sources.get("sofifa"):
+                _src_parts.append(f"SoFIFA: {_sources['sofifa']}")
+            if _sources.get("flashscore"):
+                _src_parts.append(f"Flashscore: {_sources['flashscore']}")
+            if players_not_found:
+                _src_parts.append(f"Negasite: {players_not_found}")
+            _lines.append("Poze — " + " | ".join(_src_parts) if _src_parts else f"Poze: {players_ok} OK")
+            # SofaScore lineup
+            if _ss_ok is True:
+                _lines.append("✓ SofaScore lineup OK")
+            elif _ss_ok is False and sofascore_url:
+                _lines.append("✗ SofaScore lineup FAILED")
+            # Jucatori negasiti
             if errors:
                 _lines.append(f"Negasite: {', '.join(errors[:8])}")
                 if len(errors) > 8:

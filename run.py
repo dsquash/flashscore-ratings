@@ -1509,6 +1509,8 @@ async def download_all_images(data: dict, images_only: bool = False,
     away_team = data.get("match", {}).get("away_team", "")
 
     ok = 0; fail = 0; missing = []
+    sources = {}          # {"photo": N, "flashscore": N, ...}
+    ss_lineup_ok = False  # SofaScore lineup loaded?
 
     # Incarca lista placeholder-elor existente (prefix_i -> name)
     placeholders_path = OUTPUT_DIR / "placeholders.json"
@@ -1567,6 +1569,7 @@ async def download_all_images(data: dict, images_only: bool = False,
             if _ss_event_id:
                 print(f"  [Sofascore lineup] Event ID: {_ss_event_id}")
                 home_lineup_map, away_lineup_map = await _fetch_sofascore_lineup(page, _ss_event_id)
+                ss_lineup_ok = bool(home_lineup_map or away_lineup_map)
 
             # ── 1. Descarca logo-uri echipe din Flashscore ────────────────
             fs_home_logo = data.get("match", {}).get("home_logo_url", "")
@@ -1707,6 +1710,8 @@ async def download_all_images(data: dict, images_only: bool = False,
                 if raw and save_image(raw, dest):
                     print(f"  ✓ {name}: OK ({src}{num_label})")
                     ok += 1
+                    _src_key = src if src in ("photo", "flashscore") else "sofifa"
+                    sources[_src_key] = sources.get(_src_key, 0) + 1
                     placeholders.pop(file_key, None)
                 else:
                     safe_name = re.sub(r'[^\w\s\-]', '', name).strip()
@@ -1739,7 +1744,7 @@ async def download_all_images(data: dict, images_only: bool = False,
     if missing:
         print(f"      Missing: {', '.join(missing)}")
 
-    return ok, fail, missing
+    return ok, fail, missing, sources, ss_lineup_ok
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1814,7 +1819,7 @@ def main():
             return
 
     # 2. Download imagini
-    _dl_ok, _dl_fail, _dl_missing = asyncio.run(
+    _dl_ok, _dl_fail, _dl_missing, _dl_sources, _dl_ss_ok = asyncio.run(
         download_all_images(data, images_only=images_only,
                             player_only=player_only,
                             sofascore_url=sofascore_url))
@@ -1859,6 +1864,8 @@ def main():
             extra={
                 "match": f"{_m.get('home_team','')} {_m.get('home_score','')} - {_m.get('away_score','')} {_m.get('away_team','')}",
                 "formations": f"{_m.get('home_formation','')} vs {_m.get('away_formation','')}",
+                "sources": _dl_sources,
+                "ss_lineup_ok": _dl_ss_ok,
             },
         )
     except Exception:

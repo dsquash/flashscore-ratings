@@ -8,7 +8,7 @@ REM ============================================================
 
 set GITHUB_ZIP=https://github.com/dsquash/flashscore-ratings/archive/refs/heads/main.zip
 set GDRIVE_FOLDER_ID=1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti
-set GDRIVE_TEMPLATE_ZIP_ID=1p65csy_J7fytJV77JVDOHs8b54XQDX8k
+set GDRIVE_TEMPLATE_ZIP_ID=1qNKeaZReMOWc4bU5qLVpBFlcYOnM3dOl
 set GDRIVE_URL=https://drive.google.com/drive/folders/1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti
 
 set INSTALL_DIR=%~dp0

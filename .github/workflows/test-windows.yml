@@ -53,7 +53,7 @@ jobs:
       - name: Test AE template download (zip via Invoke-WebRequest)
         shell: powershell
         run: |
-          $zipId = "1p65csy_J7fytJV77JVDOHs8b54XQDX8k"
+          $zipId = "1qNKeaZReMOWc4bU5qLVpBFlcYOnM3dOl"
           $url = "https://drive.usercontent.google.com/download?id=$zipId&export=download&confirm=t"
           $zip = "$env:TEMP\tpl_test.zip"
           Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing

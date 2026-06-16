@@ -17,7 +17,7 @@ RAW_BASE="https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${BRA
 API_BASE="https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents"
 API_ACCEPT="Accept: application/vnd.github.raw"
 GDRIVE_FOLDER_ID="1OwZoHfrUxtAZtS042g63Pqw0eSqP31Ti"
-GDRIVE_TEMPLATE_ZIP_ID="1p65csy_J7fytJV77JVDOHs8b54XQDX8k"   # single template .zip on Drive
+GDRIVE_TEMPLATE_ZIP_ID="1qNKeaZReMOWc4bU5qLVpBFlcYOnM3dOl"   # single template .zip on Drive
 
 PYTHON_PKG_URL="https://www.python.org/ftp/python/3.12.8/python-3.12.8-macos11.pkg"
 PYTHON_ORG_BIN="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3"

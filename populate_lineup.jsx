@@ -737,20 +737,6 @@ function fillStats(comp, player) {
 
     fx(ctrl, FX.note,          ratingSlider);
 
-    // ── DEBUG rating: nume | nota bruta | valoare parsata | ce a stocat slider-ul ──
-    try {
-        var _rbDir = (dir || $.global.__LINEUP_SCRIPTS_DIR__ || "").replace(/\\/g,"/").replace(/\/$/,"");
-        var _rbF = new File(_rbDir + "/lineup_debug.txt");
-        _rbF.encoding = "UTF-8"; _rbF.open("a");
-        var _slVal = "?";
-        try { _slVal = ctrl.effect("Note").property(1).value; } catch(e) {}
-        _rbF.writeln("RATING: " + (player.name||"?") +
-                     " | raw=" + JSON.stringify(player.rating) +
-                     " | parsed=" + rating + " | slider=" + ratingSlider +
-                     " | sliderReadback=" + _slVal);
-        _rbF.close();
-    } catch(e) {}
-
     fx(ctrl, FX.goal,          has(ev, "goal")            ? 1 : 0);
     fx(ctrl, FX.change,        has(ev, "substituted_out") ? 1 : 0);
     fx(ctrl, FX.yellowCard,    has(ev, "yellow_card")     ? 1 : 0);

@@ -717,6 +717,11 @@ function fillStats(comp, player) {
     var ev     = player.events || [];
     var nGoals = cnt(ev, "goal");
     var rating = parseFloat(player.rating) || 0;
+    // Float32 fix: AE stocheaza slider-ul in float32, care rotunjeste ex. 6.9
+    // la 6.90000009 (> 6.9) si pica pragul "tinta <= 6.9" din expresia de culoare,
+    // colorand verde in loc de galben. Scadem un epsilon minuscul (invizibil la
+    // afisare, tot "6.9" apare) ca float32 sa cada in banda corecta.
+    var ratingSlider = rating > 0 ? rating - 0.01 : 0;
 
     // Debug: scrie in lineup_debug.txt pentru jucatorii cu goluri
     if (nGoals >= 1) {
@@ -730,7 +735,7 @@ function fillStats(comp, player) {
         } catch(e) {}
     }
 
-    fx(ctrl, FX.note,          rating);
+    fx(ctrl, FX.note,          ratingSlider);
 
     // ── DEBUG rating: nume | nota bruta | valoare parsata | ce a stocat slider-ul ──
     try {
@@ -741,7 +746,7 @@ function fillStats(comp, player) {
         try { _slVal = ctrl.effect("Note").property(1).value; } catch(e) {}
         _rbF.writeln("RATING: " + (player.name||"?") +
                      " | raw=" + JSON.stringify(player.rating) +
-                     " | parsed=" + rating +
+                     " | parsed=" + rating + " | slider=" + ratingSlider +
                      " | sliderReadback=" + _slVal);
         _rbF.close();
     } catch(e) {}

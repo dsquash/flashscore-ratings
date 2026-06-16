@@ -177,9 +177,11 @@ if (typeof JSON.stringify !== "function") {
     function refreshPlayerStats(ctrl, player, isSub) {
         var ev     = player.events || [];
         var rating = parseFloat(player.rating) || 0;
+    // Float32 fix (vezi populate_lineup.jsx): epsilon ca expresia de culoare sa nu dea verde la 6.9
+    var ratingSlider = rating > 0 ? rating - 0.01 : 0;
         var nGoals = cnt(ev, "goal");
 
-        fx(ctrl, FX.note,       rating);
+        fx(ctrl, FX.note,       ratingSlider);
         fx(ctrl, FX.goal,       has(ev, "goal")            ? 1 : 0);
         fx(ctrl, FX.yellowCard, has(ev, "yellow_card")     ? 1 : 0);
         fx(ctrl, FX.redCard,    has(ev, "red_card")        ? 1 : 0);

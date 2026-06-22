@@ -337,6 +337,34 @@
             $.global.__LINEUP_SCRIPTS_DIR__ = dir;
             $.evalFile(fScript);
             statusTxt.text = label + " \u2014 done.";
+
+            // After POPULATE: open reference sites + remind to verify everything
+            if (label === "POPULATE") {
+                var fsUrl = "";
+                try {
+                    var _uf = new File(dir + "/flashscore_output/last_url.txt");
+                    if (_uf.exists) { _uf.open("r"); fsUrl = _uf.read().replace(/[\r\n]/g, "").replace(/^\s+|\s+$/g, ""); _uf.close(); }
+                } catch(_eu) {}
+                var fifaUrl = "https://inside.fifa.com/fifa-world-ranking/men";
+                var _isMac = ($.os.toLowerCase().indexOf("mac") >= 0);
+                function _openUrl(u) {
+                    if (!u) return;
+                    try {
+                        if (_isMac) system.callSystem('open "' + u + '"');
+                        else        system.callSystem('cmd /c start "" "' + u + '"');
+                    } catch(_eo) {}
+                }
+                _openUrl(fifaUrl);
+                if (fsUrl) _openUrl(fsUrl);
+                alert("Populate complete.\n\n" +
+                      "Please double-check that everything is correct:\n" +
+                      "  \u2022 Player names, photos and ratings\n" +
+                      "  \u2022 Score, goals and cards\n" +
+                      "  \u2022 FIFA ranking shown under each team name\n\n" +
+                      "Two pages were opened so you can verify:\n" +
+                      "  \u2022 FIFA World Ranking\n" +
+                      "  \u2022 Flashscore match page");
+            }
         } catch(e) {
             var msg = (e.message || String(e));
             if (e.line) msg += " (linie " + e.line + ")";

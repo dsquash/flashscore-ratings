@@ -1754,43 +1754,33 @@ async def download_all_images(data: dict, images_only: bool = False,
 def _fetch_fifa_rankings(home_team: str, away_team: str) -> tuple:
     """
     Returneaza (home_rank, away_rank) ca string-uri — pozitia in FIFA World Ranking
-    (https://inside.fifa.com/fifa-world-ranking/men). "" pentru echipe negasite
-    (ex: cluburi). Nu ridica niciodata exceptii.
+    LIVE (api.fifa.com). "" pentru echipe negasite (ex: cluburi). Nu ridica exceptii.
+    Endpoint-ul 'live' e mereu cel curent (pagina inside.fifa.com se actualizeaza
+    periodic — acest API reflecta ranking-ul la zi).
     """
     if not home_team and not away_team:
         return "", ""
     try:
         import urllib.request as _ur, json as _json, unicodedata as _ud
         _UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-        # 1. Cel mai recent dateId din pagina
-        _rq = _ur.Request("https://inside.fifa.com/fifa-world-ranking/men",
-                          headers={"User-Agent": _UA})
-        with _ur.urlopen(_rq, timeout=15) as _r:
-            _html = _r.read().decode("utf-8", "replace")
-        _ids = re.findall(r"id1[0-9]{4}", _html)
-        if not _ids:
+        _api = ("https://api.fifa.com/api/v3/fifarankings/rankings/live"
+                "?gender=1&sportType=0&language=en")
+        _rq = _ur.Request(_api, headers={"User-Agent": _UA, "Accept": "application/json"})
+        _res = _json.loads(_ur.urlopen(_rq, timeout=20).read()).get("Results", [])
+        if not _res:
             return "", ""
-        _latest = "id" + str(max(int(_x[2:]) for _x in _ids))
-        # 2. Ranking-ul
-        _api = ("https://inside.fifa.com/api/ranking-overview?locale=en&dateId=" + _latest)
-        _rq2 = _ur.Request(_api, headers={"User-Agent": _UA, "Accept": "application/json"})
-        with _ur.urlopen(_rq2, timeout=15) as _r:
-            _data = _json.loads(_r.read())
-        _rankings = _data.get("rankings", [])
-        if not _rankings:
-            return "", ""
-        # 3. Index nume normalizat -> rank, si cod tara -> rank
         def _fn(_s):
             _s = _ud.normalize("NFD", _s or "")
             _s = "".join(_c for _c in _s if _ud.category(_c) != "Mn")
             return re.sub(r"[^a-z0-9 ]", "", _s.lower()).strip()
         _by, _by_cc = {}, {}
-        for _it in _rankings:
-            _ri = _it.get("rankingItem", {})
-            if _ri.get("name"):        _by[_fn(_ri["name"])] = _ri.get("rank")
-            if _ri.get("countryCode"): _by_cc[_ri["countryCode"].lower()] = _ri.get("rank")
+        for _it in _res:
+            _tn = _it.get("TeamName") or []
+            _nm = _tn[0].get("Description", "") if _tn else ""
+            if _nm: _by[_fn(_nm)] = _it.get("Rank")
+            if _it.get("IdCountry"): _by_cc[_it["IdCountry"].lower()] = _it.get("Rank")
         _aliases = {
-            "south korea": "korea republic", "north korea": "korea dpr",
+            "south korea": "korea republic", "north korea": "dpr korea",
             "iran": "ir iran", "turkey": "turkiye", "czech republic": "czechia",
             "ivory coast": "cote divoire", "dr congo": "congo dr",
             "cape verde": "cabo verde", "united states": "usa", "china": "china pr",
@@ -1814,7 +1804,6 @@ def _fetch_fifa_rankings(home_team: str, away_team: str) -> tuple:
     except Exception as _e:
         print(f"  ⚠ FIFA ranking: {_e}")
         return "", ""
-
 
 def main():
     # Suporta flag --images-only: sare peste scraping, foloseste data.json existent

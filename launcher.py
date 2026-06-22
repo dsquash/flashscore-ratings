@@ -750,7 +750,7 @@ class App(_BASE_CLS):
                     def on_progress(current, total, name, ok):
                         status = "✓" if ok else "✗"
                         self.after(0, progress_var.set, f"[{current}/{total}] {status}  {name}")
-                    updated, failed, _ = updater.apply_update(on_progress)
+                    updated, failed, _ae_done = updater.apply_update(on_progress)
 
                 tpl_line = ""
                 if tpl_avail:
@@ -765,6 +765,8 @@ class App(_BASE_CLS):
                     lines.append(f"✓ Updated {len(updated)} file(s).")
                     if failed:
                         lines.append(f"⚠ {len(failed)} file(s) failed.")
+                if code_avail and _ae_done:
+                    lines.append("✓ After Effects panel updated (restart AE to load it).")
                 if tpl_line:
                     lines.append(tpl_line)
                 # Restart needed only if app files changed

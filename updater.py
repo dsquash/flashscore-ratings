@@ -335,6 +335,33 @@ def apply_template_update(progress_cb=None) -> tuple:
 
 # ── Apply update ──────────────────────────────────────────────────
 
+def _install_ae_panel():
+    """
+    Copiaza 'Lineup Panel.jsx' din _DO NOT TOUCH_ in folderul de panel-uri al
+    fiecarei versiuni de After Effects gasite (Mac + Windows). Asa extensia se
+    actualizeaza odata cu update-ul (necesita restart AE ca sa se incarce).
+    Returneaza lista de cai unde s-a copiat.
+    """
+    import glob as _glob
+    src = BASE_DIR / "Lineup Panel.jsx"
+    if not src.exists():
+        return []
+    done = []
+    _patterns = [
+        "/Applications/Adobe After Effects */Scripts/ScriptUI Panels",
+        "C:/Program Files/Adobe/Adobe After Effects */Support Files/Scripts/ScriptUI Panels",
+        "C:/Program Files/Adobe/Adobe After Effects */Scripts/ScriptUI Panels",
+    ]
+    for _pat in _patterns:
+        for _panels in _glob.glob(_pat):
+            try:
+                shutil.copy2(str(src), os.path.join(_panels, "Lineup Panel.jsx"))
+                done.append(_panels)
+            except Exception:
+                pass
+    return done
+
+
 def apply_update(progress_cb=None) -> tuple:
     """
     Downloads each file in UPDATABLE_FILES from GitHub and saves it locally.
@@ -373,7 +400,16 @@ def apply_update(progress_cb=None) -> tuple:
         if progress_cb:
             progress_cb(i + 1, total, filename, ok)
 
-    return updated, failed, []
+    # Copiaza panel-ul si in After Effects (altfel extensia ramane veche in AE)
+    ae_done = []
+    try:
+        ae_done = _install_ae_panel()
+        if ae_done and progress_cb:
+            progress_cb(total, total, "Lineup Panel.jsx -> After Effects", True)
+    except Exception:
+        pass
+
+    return updated, failed, ae_done
 
 
 def get_changelog() -> str:

@@ -75,7 +75,7 @@ REM Create _DO NOT TOUCH_ folder
 if not exist "%SCRIPTS_DIR%" mkdir "%SCRIPTS_DIR%"
 
 REM Move script files into _DO NOT TOUCH_
-set SCRIPT_FILES=launcher.py run.py refresh_stats.py updater.py version.txt CHANGELOG.md sofifa_overrides.json
+set SCRIPT_FILES=launcher.py run.py refresh_stats.py updater.py telemetry.py version.txt CHANGELOG.md sofifa_overrides.json
 for %%F in (%SCRIPT_FILES%) do (
     if exist "%TEMP%\flashscore_extract\flashscore-ratings-main\%%F" (
         copy /Y "%TEMP%\flashscore_extract\flashscore-ratings-main\%%F" "%SCRIPTS_DIR%\%%F" >nul

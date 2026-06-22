@@ -24,7 +24,7 @@ PYTHON_ORG_BIN="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3"
 
 # Scripts downloaded to _DO NOT TOUCH_/
 SCRIPT_FILES=(
-    "launcher.py" "run.py" "refresh_stats.py" "updater.py"
+    "launcher.py" "run.py" "refresh_stats.py" "updater.py" "telemetry.py"
     "populate_lineup.jsx" "reset_lineup.jsx" "refresh_comps.jsx"
     "save_template_state.jsx" "Lineup Panel.jsx"
     "version.txt" "CHANGELOG.md"

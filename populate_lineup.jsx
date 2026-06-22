@@ -65,6 +65,8 @@ var TEMPLATE_COMP     = "home_player_01";
 var MAIN_COMP_NAME    = "MAIN COMP";
 var LAYER_HOME_TEAM   = "Home Team";
 var LAYER_AWAY_TEAM   = "Away Team";
+    var LAYER_HOME_FIFA   = "Home Fifa Rating";
+    var LAYER_AWAY_FIFA   = "Away Fifa Rating";
 var LAYER_SCORE       = "Score";
 var LAYER_HOME_LOGO   = "Home Logo";        // layer imagine in MAIN COMP
 var LAYER_AWAY_LOGO   = "Away Logo";        // layer imagine in MAIN COMP
@@ -268,6 +270,12 @@ var playerGlobalIdx = 0;
     // ── Match info ───────────────────────────────────────────
     setTxt(mainComp, LAYER_HOME_TEAM, match.home_team);
     setTxt(mainComp, LAYER_AWAY_TEAM, match.away_team);
+
+    // ── FIFA World Ranking (sub numele echipei) ──────────────
+    if (match.home_fifa_rank)
+        setTxt(mainComp, LAYER_HOME_FIFA, "Fifa Ranking: " + match.home_fifa_rank);
+    if (match.away_fifa_rank)
+        setTxt(mainComp, LAYER_AWAY_FIFA, "Fifa Ranking: " + match.away_fifa_rank);
 
     // ── Logo-uri ─────────────────────────────────────────────
     replaceImgLayer(mainComp, LAYER_HOME_LOGO, imagesDir + "home_logo.png");

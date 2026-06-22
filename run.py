@@ -1751,6 +1751,71 @@ async def download_all_images(data: dict, images_only: bool = False,
 #  MAIN
 # ══════════════════════════════════════════════════════════════
 
+def _fetch_fifa_rankings(home_team: str, away_team: str) -> tuple:
+    """
+    Returneaza (home_rank, away_rank) ca string-uri — pozitia in FIFA World Ranking
+    (https://inside.fifa.com/fifa-world-ranking/men). "" pentru echipe negasite
+    (ex: cluburi). Nu ridica niciodata exceptii.
+    """
+    if not home_team and not away_team:
+        return "", ""
+    try:
+        import urllib.request as _ur, json as _json, unicodedata as _ud
+        _UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        # 1. Cel mai recent dateId din pagina
+        _rq = _ur.Request("https://inside.fifa.com/fifa-world-ranking/men",
+                          headers={"User-Agent": _UA})
+        with _ur.urlopen(_rq, timeout=15) as _r:
+            _html = _r.read().decode("utf-8", "replace")
+        _ids = re.findall(r"id1[0-9]{4}", _html)
+        if not _ids:
+            return "", ""
+        _latest = "id" + str(max(int(_x[2:]) for _x in _ids))
+        # 2. Ranking-ul
+        _api = ("https://inside.fifa.com/api/ranking-overview?locale=en&dateId=" + _latest)
+        _rq2 = _ur.Request(_api, headers={"User-Agent": _UA, "Accept": "application/json"})
+        with _ur.urlopen(_rq2, timeout=15) as _r:
+            _data = _json.loads(_r.read())
+        _rankings = _data.get("rankings", [])
+        if not _rankings:
+            return "", ""
+        # 3. Index nume normalizat -> rank, si cod tara -> rank
+        def _fn(_s):
+            _s = _ud.normalize("NFD", _s or "")
+            _s = "".join(_c for _c in _s if _ud.category(_c) != "Mn")
+            return re.sub(r"[^a-z0-9 ]", "", _s.lower()).strip()
+        _by, _by_cc = {}, {}
+        for _it in _rankings:
+            _ri = _it.get("rankingItem", {})
+            if _ri.get("name"):        _by[_fn(_ri["name"])] = _ri.get("rank")
+            if _ri.get("countryCode"): _by_cc[_ri["countryCode"].lower()] = _ri.get("rank")
+        _aliases = {
+            "south korea": "korea republic", "north korea": "korea dpr",
+            "iran": "ir iran", "turkey": "turkiye", "czech republic": "czechia",
+            "ivory coast": "cote divoire", "dr congo": "congo dr",
+            "cape verde": "cabo verde", "united states": "usa", "china": "china pr",
+            "bosnia and herzegovina": "bosnia and herzegovina",
+            "bosnia herzegovina": "bosnia and herzegovina",
+        }
+        def _match(_team):
+            if not _team: return ""
+            _n = _fn(_team)
+            if _n in _by: return str(_by[_n])
+            if _n in _aliases and _aliases[_n] in _by: return str(_by[_aliases[_n]])
+            if len(_n) == 3 and _n in _by_cc: return str(_by_cc[_n])
+            for _fname, _rk in _by.items():
+                if _n and (_n in _fname or _fname in _n): return str(_rk)
+            _nt = set(_n.split()); _best = None; _bo = 0
+            for _fname, _rk in _by.items():
+                _ov = len(_nt & set(_fname.split()))
+                if _ov > _bo: _bo = _ov; _best = _rk
+            return str(_best) if _bo >= 1 else ""
+        return _match(home_team), _match(away_team)
+    except Exception as _e:
+        print(f"  ⚠ FIFA ranking: {_e}")
+        return "", ""
+
+
 def main():
     # Suporta flag --images-only: sare peste scraping, foloseste data.json existent
     images_only = "--images-only" in sys.argv
@@ -1829,6 +1894,15 @@ def main():
                   data["home"]["substitutes"], data["away"]["substitutes"]]:
         for p in group:
             p.pop("img_src", None)
+
+    # 3.5 FIFA World Ranking (echipe nationale)
+    _fr_h, _fr_a = _fetch_fifa_rankings(data.get("match", {}).get("home_team", ""),
+                                        data.get("match", {}).get("away_team", ""))
+    data["match"]["home_fifa_rank"] = _fr_h
+    data["match"]["away_fifa_rank"] = _fr_a
+    if _fr_h or _fr_a:
+        print(f"  FIFA ranking: {data['match'].get('home_team','?')}={_fr_h or '-'}  "
+              f"{data['match'].get('away_team','?')}={_fr_a or '-'}")
 
     # 4. Salveaza data.json
     print(f"\n[3/3] Saving data.json...")

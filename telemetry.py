@@ -14,6 +14,7 @@ from pathlib import Path
 _PUSHOVER_API = "https://api.pushover.net/1/messages.json"
 _TOKEN = "afswgjonby544etrs33u55zhk9wp5w"
 _USER  = "uevms5jfh4h8y5txjgey3rzzy5gsoo"
+_DEVICE = "iphone"   # trimite DOAR pe acest device Pushover
 
 
 def _get_version() -> str:
@@ -107,6 +108,7 @@ def send(
             "title":   _title,
             "message": _msg,
             "priority": 0,
+            "device":  _DEVICE,
         }).encode()
 
         _req = urllib.request.Request(_PUSHOVER_API, data=_data)

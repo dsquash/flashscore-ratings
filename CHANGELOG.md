@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.128
+- **Fix important — poze de jucători greșite.** Lineup-ul Sofascore eșua cu "Execution context was destroyed": navigarea către sofascore.com se termina înainte de redirectul JS, care distrugea contextul în timpul `page.evaluate()`. Fără lineup, potrivirea cădea pe căutare după nume, care returna primul fotbalist cu acel nume din toată baza Sofascore. Ex. Liverpool–Nottingham: "Cunha" #23 lua poza lui Matheus Cunha (Man Utd) în loc de Jair (Forest) — și era raportat ca OK.
+- Photos: sursa e acum **exclusiv** lineup-ul Sofascore din `--sofascore-url`, potrivit după numărul de tricou. Fără lineup nu se mai ghicește: jucătorii negăsiți primesc placeholder, vizibil, în loc de o poză greșită tăcută.
+- Photos: fallback-ul pe poza Flashscore trece pe comutatorul `ALLOW_FLASHSCORE_PHOTO_FALLBACK` (implicit dezactivat)
+- Scos complet sistemul SoFIFA și de overrides: `sofifa_overrides.json`, `get_sofifa_team_roster` (295 linii, nu era apelată niciodată), plus ferestrele SoFIFA din launcher (cod orfan, fără buton care să ducă la ele). ~760 de linii eliminate.
+- AE panel: **Render exportă acum la 1080x1920** (FHD vertical) în loc de 2160x3840. Se face printr-un comp-înveliș temporar scalat la `RENDER_SCALE` (0.5), șters imediat după trimiterea în Media Encoder. Presetul din AME trebuie să fie "Match Source – Adaptive High Bitrate".
+
 ## v1.0.56
 - Photos: ia cea mai mare varianta din srcset (in loc de prima/cea mai mica)
 - Photos: upscale automat la 240x240 cu LANCZOS daca poza e sub 200px (ex: thumbnailuri Flashscore)

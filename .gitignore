@@ -19,3 +19,10 @@ POATE FI STERS*/
 Thumbs.db
 *.tmp
 *.bak
+
+# ── Local, nu se publica ─────────────────────────────────────────
+# CLAUDE.md e documentatie locala; a continut secrete in trecut
+CLAUDE.md
+.claude/
+# Copia de arhiva a template-ului curat (AE + Collect Files)
+_template-master/

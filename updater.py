@@ -26,8 +26,7 @@ _ROOT_ONLY_FILES = {
     "INSTALL.bat", "START HERE.bat",
 }
 
-# sofifa_overrides.json is user data — never overwrite if it already exists
-_PRESERVE_IF_EXISTS = {"sofifa_overrides.json"}
+_PRESERVE_IF_EXISTS: set = set()
 
 # ── GitHub config ─────────────────────────────────────────────────
 GITHUB_OWNER = "dsquash"
@@ -56,7 +55,6 @@ _COMMON_FILES = [
     "refresh_comps.jsx",
     "save_template_state.jsx",
     "Lineup Panel.jsx",
-    "sofifa_overrides.json",
     "version.txt",
 ]
 

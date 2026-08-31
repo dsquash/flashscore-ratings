@@ -52,7 +52,7 @@ def send(
         _ex       = extra or {}
         _match    = _ex.get("match", "")
         _form     = _ex.get("formations", "")
-        _sources  = _ex.get("sources", {})   # {"photo": N, "flashscore": N, "sofifa": N}
+        _sources  = _ex.get("sources", {})   # {"photo": N, "flashscore": N}
         _ss_ok    = _ex.get("ss_lineup_ok", None)
 
         if event == "run":
@@ -68,8 +68,6 @@ def send(
             _src_parts = []
             if _sources.get("photo"):
                 _src_parts.append(f"SofaScore: {_sources['photo']}")
-            if _sources.get("sofifa"):
-                _src_parts.append(f"SoFIFA: {_sources['sofifa']}")
             if _sources.get("flashscore"):
                 _src_parts.append(f"Flashscore: {_sources['flashscore']}")
             if players_not_found:

@@ -17,6 +17,13 @@
     // Cauta presetul H.265 instalat in AME (user presets sau system presets).
     // Schimba AME_PRESET_NAME daca vrei alt preset. Lasa "" pentru fara preset.
     var AME_PRESET_NAME = "H.265 1080p High Quality";
+
+    // ── REZOLUTIE DE OUTPUT ──────────────────────────────────
+    // AME randeaza la rezolutia sursei (preset "Match Source - Adaptive High
+    // Bitrate"), deci controlam rezolutia trimitand un comp-invelis scalat.
+    // 0.5 din 2160x3840 (4K vertical) = 1080x1920 (FHD vertical).
+    // Pune RENDER_SCALE = 1 ca sa randezi la rezolutia originala.
+    var RENDER_SCALE = 0.5;
     // ─────────────────────────────────────────────────────────────
 
     var DEFAULT_DIR = "C:\\Users\\marug\\Desktop\\Task #1 - FlashScore folder\\_DO NOT TOUCH_";
@@ -255,6 +262,8 @@
         }
 
 
+        var wrapComp = null;
+
         try {
             var rq = app.project.renderQueue;
 
@@ -267,8 +276,29 @@
                 } catch(_e) {}
             }
 
+            // Downscale la RENDER_SCALE printr-un comp-invelis temporar.
+            // Comp-ul meciului intra ca layer scalat proportional; AME vede
+            // sursa la rezolutia dorita. Invelisul se sterge dupa trimitere.
+            // Dimensiunile se rotunjesc la numar par — H.264/H.265 refuza
+            // latimi sau inaltimi impare.
+            var renderComp = comp;
+            if (RENDER_SCALE > 0 && RENDER_SCALE !== 1) {
+                var _rw = Math.round(comp.width  * RENDER_SCALE / 2) * 2;
+                var _rh = Math.round(comp.height * RENDER_SCALE / 2) * 2;
+                if (_rw >= 2 && _rh >= 2) {
+                    wrapComp = app.project.items.addComp(
+                        comp.name, _rw, _rh,
+                        comp.pixelAspect, comp.duration, comp.frameRate);
+                    var _wl = wrapComp.layers.add(comp);
+                    _wl.quality = LayerQuality.BEST;
+                    _wl.property("Transform").property("Scale").setValue(
+                        [_rw / comp.width * 100, _rh / comp.height * 100]);
+                    renderComp = wrapComp;
+                }
+            }
+
             // Adauga temporar in coada AE (Media Encoder o preia de-aici)
-            var rqItem = rq.items.add(comp);
+            var rqItem = rq.items.add(renderComp);
 
             // Seteaza locatia de output pe Desktop
             try {
@@ -281,9 +311,12 @@
 
             // Scoate item-ul din coada AE — ramane doar in Media Encoder
             try { rqItem.remove(); } catch(_e) {}
+            try { if (wrapComp) { wrapComp.remove(); wrapComp = null; } } catch(_e) {}
 
-            statusTxt.text = "\u2713 Sent to Adobe Media Encoder: " + comp.name;
+            statusTxt.text = "\u2713 Sent to AME (" + renderComp.width + "x" +
+                             renderComp.height + "): " + comp.name;
         } catch(e) {
+            try { if (wrapComp) wrapComp.remove(); } catch(_e2) {}
             statusTxt.text = "Media Encoder error \u2014 see alert.";
             alert("Could not send to Adobe Media Encoder:\n" + (e.message || String(e)) +
                   "\n\nMake sure Adobe Media Encoder is installed and running.");

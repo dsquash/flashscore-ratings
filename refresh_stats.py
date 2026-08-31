@@ -111,7 +111,7 @@ def main():
         else:
             print("\n  No changes compared to previous data.json.")
 
-    # Preserve kit numbers from SoFIFA (refresh doesn't re-download from SoFIFA)
+    # Preserve kit numbers (refresh nu re-descarca pozele)
     if old_data:
         _restore_kit_numbers(old_data, new_data)
 
@@ -213,7 +213,7 @@ def _download_missing_photos(r, new_data: dict, new_players: list) -> str:
         marker = " (new)" if name in new_players else ""
         print(f"    → {name}{marker}")
 
-    print("\n  Downloading from SoFIFA...")
+    print("\n  Downloading photos...")
     asyncio.run(r.download_all_images(new_data))
 
     # Reincarca placeholders dupa download (pot fi actualizate)
@@ -247,9 +247,9 @@ def _download_missing_photos(r, new_data: dict, new_players: list) -> str:
 
 def _restore_kit_numbers(old_data: dict, new_data: dict):
     """
-    Copiaza kit numbers (numarul de tricou din SoFIFA) din data.json vechi
+    Copiaza kit numbers (numarul de tricou) din data.json vechi
     in cel nou, pentru jucatorii cu acelasi nume.
-    refresh_stats nu re-descarca de pe SoFIFA, deci pastram ce avem.
+    refresh_stats nu re-descarca pozele, deci pastram ce avem.
     """
     old_numbers = {}
     for group_key in [("home", "players"), ("home", "substitutes"),

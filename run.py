@@ -55,17 +55,6 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
 # "national" = meci de nationala (Nations League, CM, CE etc.)
 MATCH_TYPE = "club"
 
-# ── SoFIFA API ─────────────────────────────────────────────────
-SOFIFA_API_BASE  = "https://api.sofifa.net"
-SOFIFA_CDN_BASE  = "https://cdn.sofifa.net/players"
-SOFIFA_API_TOKEN = "rWXBRm1CliEYGcZH8o"   # folosit DOAR ca path-param in /customizedPlayers/
-# Endpoint-urile publice (/leagues /teams /team) NU necesita autentificare
-SOFIFA_HEADERS   = {
-    "User-Agent": UA,
-    "Accept": "application/json",
-    "Referer": "https://sofifa.com/",
-    "Origin": "https://sofifa.com",
-}
 
 
 
@@ -658,8 +647,13 @@ def scrape_flashscore(url: str) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
-#  STEP 2 — DOWNLOAD IMAGINI + NUMERE DE PE SOFIFA
+#  STEP 2 — DOWNLOAD IMAGINI DE PE SOFASCORE
 # ══════════════════════════════════════════════════════════════
+
+# Sursa pozelor e exclusiv lineup-ul Sofascore din --sofascore-url.
+# True = jucatorii care lipsesc din acel lineup iau poza de pe Flashscore
+# in loc de placeholder.
+ALLOW_FLASHSCORE_PHOTO_FALLBACK = False
 
 # ── Helpers pentru potrivire nume ─────────────────────────────
 
@@ -671,404 +665,18 @@ def _norm(name: str) -> str:
     return n.strip()
 
 
-def _name_match(search: str, found: str) -> float:
-    """
-    Scor 0-1: cat de bine potriveste 'found' (SoFIFA) cu 'search' (Flashscore).
-    Ex: search='Martinelli G', found='Gabriel Martinelli' → 1.0 (token 'martinelli' gasit)
-    """
-    s = _norm(search)
-    f = _norm(found)
-    toks = [t for t in s.split() if len(t) >= 3]
-    if not toks:
-        return 0.0
-    return sum(1 for t in toks if t in f) / len(toks)
 
 
-def _search_keywords(name: str) -> list:
-    """
-    Genereaza variante de keyword pentru cautare SoFIFA din numele Flashscore.
-    'Martinelli G'  → ['Martinelli G', 'Martinelli']
-    'Madueke N.'    → ['Madueke N', 'Madueke']
-    'Foden'         → ['Foden']
-    """
-    clean = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
-    clean = re.sub(r'\.$', '', clean).strip()
-    kws = [clean]
-    # Scoate initiala de la final: "Martinelli G" → "Martinelli"
-    no_init = re.sub(r'\s+[A-Z]\.?$', '', clean).strip()
-    if no_init and no_init != clean and len(no_init) >= 3:
-        kws.append(no_init)
-    # Daca mai mult de 2 tokeni, incearca si primul (nume de familie scurt)
-    parts = clean.split()
-    if len(parts) >= 2 and parts[0] not in kws:
-        kws.append(parts[0])
-    return kws
 
 
-async def safe_goto(page, url: str, wait_until: str = "domcontentloaded",
-                    timeout: int = 30000, retries: int = 2):
-    """page.goto cu retry automat la timeout."""
-    last_exc = None
-    for attempt in range(retries):
-        try:
-            await page.goto(url, wait_until=wait_until, timeout=timeout)
-            return
-        except Exception as e:
-            last_exc = e
-            if attempt < retries - 1:
-                await page.wait_for_timeout(2500)
-    raise last_exc
 
 
-def _player_cdn_urls(player_id_str: str) -> list:
-    """
-    Construieste URL-uri CDN directe pentru un player ID SoFIFA.
-    cdn.sofifa.net nu are Cloudflare — imaginile pot fi descarcate direct.
-    Format: players/AAA/BBB/VV_360.png  (ID 6 cifre split 3+3)
-    """
-    sid = str(player_id_str).strip()
-    if len(sid) == 6:
-        path = f"{sid[:3]}/{sid[3:]}/"
-    elif len(sid) >= 9:
-        path = f"{sid[:3]}/{sid[3:6]}/{sid[6:9]}/"
-    elif len(sid) == 5:
-        path = f"{sid[:2]}/{sid[2:]}/"
-    else:
-        return []
-    base = f"https://cdn.sofifa.net/players/{path}"
-    return [f"{base}{v}_240.png" for v in ("26", "25", "24", "23")]
 
 
-async def _wait_past_cloudflare(page, base_ms: int = 6000):
-    """
-    Asteapta ca Cloudflare JS challenge (~5s) sa se rezolve si redirect-ul sa se termine.
-    Dupa challenge, Cloudflare face un redirect intern — trebuie sa asteptam si asta.
-    """
-    await page.wait_for_timeout(base_ms)
-    # Daca inca suntem pe pagina de challenge, mai asteptam
-    try:
-        title = await page.title()
-        if "just a moment" in title.lower() or "checking your browser" in title.lower():
-            await page.wait_for_timeout(6000)
-    except Exception:
-        await page.wait_for_timeout(3000)
-    # Asteptam ca orice navigare pendinte (redirect dupa challenge) sa se termine
-    try:
-        await page.wait_for_load_state("domcontentloaded", timeout=8000)
-    except Exception:
-        pass
 
 
-async def get_sofifa_team_roster(team_name: str, page,
-                                 match_type: str = "club") -> tuple:
-    """
-    1. Cauta echipa pe sofifa.com/teams (or /teams?type=national for national teams)
-    2. Viziteaza pagina echipei
-    3. Returneaza (team_id, [{name, kit, photo_url, player_url}])
-    """
-    # Common Flashscore short names → SoFIFA full names
-    # For national teams, SoFIFA uses country full names
-    _SOFIFA_TEAM_ALIASES = {
-        # Club aliases
-        "psg": "Paris Saint-Germain",
-        "man city": "Manchester City",
-        "man utd": "Manchester United",
-        "man united": "Manchester United",
-        "man u": "Manchester United",
-        "spurs": "Tottenham Hotspur",
-        "inter": "Internazionale",
-        "inter milan": "Internazionale",
-        "newcastle": "Newcastle United",
-        "leicester": "Leicester City",
-        "brighton": "Brighton & Hove Albion",
-        "west ham": "West Ham United",
-        "wolves": "Wolverhampton Wanderers",
-        # Atletico Madrid — multiple Flashscore abbreviations
-        "atletico": "Atletico de Madrid",
-        "atl madrid": "Atletico de Madrid",
-        "atletico madrid": "Atletico de Madrid",
-        "atletico de madrid": "Atletico de Madrid",
-        "a madrid": "Atletico de Madrid",
-        # Other common La Liga / European short names
-        "real betis": "Real Betis",
-        "betis": "Real Betis",
-        "real sociedad": "Real Sociedad",
-        "sociedad": "Real Sociedad",
-        "sevilla": "Sevilla FC",
-        "celta vigo": "RC Celta",
-        "celta": "RC Celta",
-        "deportivo alavs": "Deportivo Alaves",
-        "alaves": "Deportivo Alaves",
-        "osasuna": "CA Osasuna",
-        "getafe": "Getafe CF",
-        "mallorca": "RCD Mallorca",
-        "las palmas": "UD Las Palmas",
-        "girona": "Girona FC",
-        "valladolid": "Real Valladolid",
-        "rayo vallecano": "Rayo Vallecano",
-        "rayo": "Rayo Vallecano",
-        "leganes": "CD Leganes",
-        "espanyol": "RCD Espanyol",
-        "bayer leverkusen": "Bayer 04 Leverkusen",
-        "leverkusen": "Bayer 04 Leverkusen",
-        "eintracht frankfurt": "Eintracht Frankfurt",
-        "frankfurt": "Eintracht Frankfurt",
-        "rb leipzig": "RasenBallsport Leipzig",
-        "rb salzburg": "FC Red Bull Salzburg",
-        "bvb": "Borussia Dortmund",
-        "dortmund": "Borussia Dortmund",
-        "gladbach": "Borussia Monchengladbach",
-        "m gladbach": "Borussia Monchengladbach",
-        "hoffenheim": "TSG Hoffenheim",
-        "wolfsburg": "VfL Wolfsburg",
-        "freiburg": "Sport-Club Freiburg",
-        "mainz": "1. FSV Mainz 05",
-        "augsburg": "FC Augsburg",
-        "bochum": "VfL Bochum",
-        "heidenheim": "1. FC Heidenheim 1846",
-        "st pauli": "FC St. Pauli",
-        "union berlin": "1. FC Union Berlin",
-        "roma": "AS Roma",
-        "lazio": "SS Lazio",
-        "napoli": "SSC Napoli",
-        "atalanta": "Atalanta BC",
-        "fiorentina": "ACF Fiorentina",
-        "torino": "Torino FC",
-        "bologna": "Bologna FC 1909",
-        "udinese": "Udinese Calcio",
-        "cagliari": "Cagliari Calcio",
-        "monza": "AC Monza",
-        "lecce": "US Lecce",
-        "parma": "Parma Calcio 1913",
-        "como": "Como 1907",
-        "venezia": "Venezia FC",
-        "empoli": "Empoli FC",
-        "genoa": "Genoa CFC",
-        "verona": "Hellas Verona FC",
-        "villarreal": "Villarreal CF",
-        "ajax": "AFC Ajax",
-        "psv": "PSV",
-        "psv eindhoven": "PSV",
-        "feyenoord": "Feyenoord",
-        "porto": "FC Porto",
-        "benfica": "SL Benfica",
-        "sporting": "Sporting CP",
-        "sporting cp": "Sporting CP",
-        "braga": "SC Braga",
-        "celtic": "Celtic",
-        "rangers": "Rangers",
-        "anderlecht": "RSC Anderlecht",
-        "club brugge": "Club Brugge KV",
-        "brugge": "Club Brugge KV",
-        "lyon": "Olympique Lyonnais",
-        "marseille": "Olympique de Marseille",
-        "lille": "LOSC Lille",
-        "monaco": "AS Monaco",
-        "lens": "RC Lens",
-        "rennes": "Stade Rennais FC",
-        "nice": "OGC Nice",
-        "strasbourg": "RC Strasbourg Alsace",
-        "nantes": "FC Nantes",
-        "reims": "Stade de Reims",
-        "montpellier": "Montpellier HSC",
-        "angers": "Angers SCO",
-        "le havre": "Le Havre AC",
-        "toulouse": "Toulouse FC",
-        "auxerre": "AJ Auxerre",
-        "fenerbahce": "Fenerbahce SK",
-        "galatasaray": "Galatasaray SK",
-        "besiktas": "Besiktas JK",
-        "shakhtar": "Shakhtar Donetsk",
-        "shaktar": "Shakhtar Donetsk",
-        "dinamo zagreb": "GNK Dinamo Zagreb",
-        "red star": "FK Red Star Belgrade",
-        "red star belgrade": "FK Red Star Belgrade",
-    }
-
-    try:
-        # Genereaza variante de cautare: full name + fiecare cuvant cu >= 4 litere
-        # Also try the alias expansion (e.g. "PSG" → "Paris Saint-Germain")
-        search_variants = [team_name]
-        alias = _SOFIFA_TEAM_ALIASES.get(_norm(team_name))
-        if alias and alias not in search_variants:
-            search_variants.insert(0, alias)  # try alias first
-        for word in team_name.split():
-            if len(word) >= 4 and word not in search_variants:
-                search_variants.append(word)
-
-        JS_FIND_BEST = """(target) => {
-                const rows = document.querySelectorAll('table tbody tr');
-                let best = null, bestScore = -1;
-                rows.forEach(row => {
-                    const link = row.querySelector('td a[href*="/team/"]');
-                    if (!link) return;
-                    const nm = link.innerText.trim().toLowerCase()
-                        .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')
-                        .replace(/[^a-z0-9 ]/g,'');
-                    const toks = target.split(' ').filter(t => t.length >= 3);
-                    const score = toks.reduce(
-                        (s,t) => s + (nm.includes(t) ? t.length : 0), 0);
-                    if (score > bestScore) { bestScore = score; best = link.href; }
-                });
-                return best;
-            }"""
-
-        href = None
-        used_variant = team_name
-        type_filter = "&type=national" if match_type == "national" else ""
-        for variant in search_variants:
-            search_url = (f"https://sofifa.com/teams?keyword="
-                          f"{variant.replace(' ', '+')}{type_filter}&hl=en-US")
-            await safe_goto(page, search_url, wait_until="domcontentloaded", timeout=30000)
-            await _wait_past_cloudflare(page)
-            href = await page.evaluate(JS_FIND_BEST, _norm(variant))
-            if not href:
-                # Fallback: cauta orice link cu /team/ pe pagina, nu doar in table
-                href = await page.evaluate("""(target) => {
-                    const links = document.querySelectorAll('a[href*="/team/"]');
-                    let best = null, bestScore = -1;
-                    links.forEach(link => {
-                        const nm = (link.innerText||'').trim().toLowerCase()
-                            .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')
-                            .replace(/[^a-z0-9 ]/g,'');
-                        const toks = target.split(' ').filter(t => t.length >= 3);
-                        const score = toks.reduce(
-                            (s,t) => s + (nm.includes(t) ? t.length : 0), 0);
-                        if (score > bestScore) { bestScore = score; best = link.href; }
-                    });
-                    return bestScore > 0 ? best : null;
-                }""", _norm(variant))
-            if href:
-                used_variant = variant
-                if variant != team_name:
-                    print(f"      SoFIFA: '{team_name}' found as '{variant}'")
-                break
-
-        if not href:
-            title = await page.title()
-            if "just a moment" in title.lower() or "checking your browser" in title.lower():
-                print(f"      ℹ '{team_name}': SoFIFA team page blocked by Cloudflare — using search fallback for photos")
-            else:
-                print(f"      ⚠ '{team_name}' not found on sofifa.com/teams (page: '{title}')")
-            return 0, [], ""
-
-        m = re.search(r'/team/(\d+)', href)
-        team_id = int(m.group(1)) if m else 0
-        print(f"      SoFIFA team '{team_name}' → id={team_id}")
-
-        # Viziteaza pagina echipei
-        # Tabelul de jucatori se incarca din HTML initial — domcontentloaded e suficient
-        # si evita timeout-uri de 30s cu networkidle (ex. Dortmund)
-        await page.goto(href, wait_until="domcontentloaded", timeout=30000)
-        await _wait_past_cloudflare(page)
-        # Scroll pentru lazy-loading imagini
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await page.wait_for_timeout(800)
-        await page.evaluate("window.scrollTo(0, 0)")
-
-        # Logo echipa — SoFIFA: cdn.sofifa.net/teams/{size}/{id}.png
-        logo_url = await page.evaluate("""() => {
-            for (const img of document.querySelectorAll('img')) {
-                // Incearca src live, data-src (lazy), si atributul src static
-                const candidates = [
-                    img.src || '',
-                    img.getAttribute('data-src') || '',
-                    img.getAttribute('src') || ''
-                ];
-                for (const src of candidates) {
-                    if (!src) continue;
-                    // Pattern SoFIFA logo: /teams/{numar}/{numar}.png
-                    if (/\\/teams\\/\\d+\\/\\d+/.test(src) ||
-                        (src.includes('/teams/') && src.includes('.png'))) {
-                        return src.replace('_60.png','_240.png')
-                                  .replace('_120.png','_240.png');
-                    }
-                }
-            }
-            return '';
-        }""")
-
-        roster = await page.evaluate("""() => {
-            const result = [];
-            const table = document.querySelector('table');
-            if (!table) return result;
-
-            // Gaseste indexul coloanei kit number din header
-            let kitColIdx = -1;
-            table.querySelectorAll('thead th, thead td').forEach((th, idx) => {
-                const t = (th.innerText || th.getAttribute('title') || '').trim().toLowerCase();
-                if (t === '#' || t === 'kit' || t === 'kit number' || t.includes('kit'))
-                    kitColIdx = idx;
-            });
-
-            table.querySelectorAll('tbody tr').forEach(row => {
-                const link = row.querySelector('td a[href*="/player/"]');
-                if (!link) return;
-
-                const name = link.innerText.trim();
-                const playerUrl = link.href;
-
-                // Photo thumbnail → upgrade la 240px
-                const img = row.querySelector('img');
-                let photoUrl = '';
-                if (img) {
-                    const srcs = [img.src||'', img.getAttribute('data-src')||'',
-                                  img.getAttribute('src')||''];
-                    for (const s of srcs) {
-                        const m = s.match(/\\/players\\/(\\d+)\\/(\\d+)\\//);
-                        if (m && parseInt(m[1]) > 0) {
-                            photoUrl = s.replace('_60.png','_240.png')
-                                        .replace('_120.png','_240.png');
-                            break;
-                        }
-                    }
-                }
-
-                // Kit number — coloana identificata sau fallback primul numar mic
-                let kit = '';
-                const tds = row.querySelectorAll('td');
-                // 1. Try detected kit column
-                if (kitColIdx >= 0 && tds[kitColIdx]) {
-                    const txt = (tds[kitColIdx].innerText || '').trim();
-                    if (/^\\d{1,3}$/.test(txt)) kit = txt;
-                }
-                // 2. Scan all text-only cells for a number 1-99
-                if (!kit) {
-                    for (var _ki = 0; _ki < tds.length; _ki++) {
-                        if (tds[_ki].querySelector('img, a')) continue;
-                        const txt = (tds[_ki].innerText || '').trim();
-                        if (/^\\d{1,2}$/.test(txt) && parseInt(txt) >= 1 && parseInt(txt) <= 99) {
-                            kit = txt; break;
-                        }
-                    }
-                }
-
-                result.push({ name, kit, photoUrl, playerUrl });
-            });
-            return result;
-        }""")
-
-        print(f"      Roster '{team_name}': {len(roster)} players | logo={'YES' if logo_url else 'NO'}")
-        return team_id, roster, logo_url
-
-    except Exception as e:
-        print(f"      ⚠ get_sofifa_team_roster '{team_name}': {e}")
-        return 0, [], ""
 
 
-def _load_overrides() -> dict:
-    """
-    Incarca sofifa_overrides.json — mapari manuale Flashscore name → SoFIFA URL.
-    Ex: { "Inacio": "https://sofifa.com/player/262622/samuele-inacio-pia/" }
-    """
-    path = BASE_DIR / "sofifa_overrides.json"
-    if not path.exists():
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
 
 
 
@@ -1109,34 +717,69 @@ async def _fetch_sofascore_lineup(page, event_id: str) -> tuple:
         # Viziteaza site-ul mai intai ca sa treaca verificarile Cloudflare/JS
         try:
             await page.goto("https://www.sofascore.com/", wait_until="domcontentloaded", timeout=20000)
-            await page.wait_for_timeout(1500)
+            # Asteapta ca redirectarile/challenge-ul JS sa se aseze. Fara asta,
+            # o navigare tardiva distruge contextul JS in timpul evaluarii de mai jos
+            # ("Execution context was destroyed, most likely because of a navigation").
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                await page.wait_for_timeout(1500)
         except Exception:
             pass
-        # Fetch API din contextul JS al paginii (mosteneste cookies si sesiunea)
-        _txt = await page.evaluate(f"""async () => {{
-            try {{
-                const r = await fetch("{_api_url}", {{
-                    method: "GET",
-                    headers: {{
-                        "Accept": "application/json, text/plain, */*",
-                        "x-requested-with": "XMLHttpRequest",
-                        "Referer": "https://www.sofascore.com/"
-                    }}
-                }});
-                if (!r.ok) return JSON.stringify({{_error: r.status}});
-                return await r.text();
-            }} catch(e) {{
-                return JSON.stringify({{_error: String(e)}});
-            }}
-        }}""")
+
+        _txt = ""
+
+        # 1) APIRequestContext — partajeaza cookies cu browser-ul, dar NU depinde
+        #    de contextul JS al paginii, deci o navigare nu-l poate distruge.
+        try:
+            _r_ll = await page.context.request.get(_api_url, headers={
+                "Accept": "application/json, text/plain, */*",
+                "x-requested-with": "XMLHttpRequest",
+                "Referer": "https://www.sofascore.com/",
+            })
+            if _r_ll.ok:
+                _txt = await _r_ll.text()
+            else:
+                # 403 de la Cloudflare e normal aici: APIRequestContext nu are
+                # amprenta completa de browser. Cadem pe fetch-ul din pagina.
+                _txt = ""
+        except Exception:
+            _txt = ""
+
+        # 2) Fallback: fetch din contextul paginii, cu reincercare daca o navigare
+        #    distruge contextul JS intre timp.
+        if not _txt:
+            _js = """async () => {
+                try {
+                    const r = await fetch("__API_URL__", {
+                        method: "GET",
+                        headers: {
+                            "Accept": "application/json, text/plain, */*",
+                            "x-requested-with": "XMLHttpRequest",
+                            "Referer": "https://www.sofascore.com/"
+                        }
+                    });
+                    if (!r.ok) return JSON.stringify({_error: r.status});
+                    return await r.text();
+                } catch(e) {
+                    return JSON.stringify({_error: String(e)});
+                }
+            }""".replace("__API_URL__", _api_url)
+            for _attempt in range(3):
+                try:
+                    _txt = await page.evaluate(_js)
+                    break
+                except Exception as _ev_e:
+                    if "context was destroyed" in str(_ev_e).lower() and _attempt < 2:
+                        await page.wait_for_timeout(2000)
+                        continue
+                    raise
+
         _data_check = _json_ll.loads(_txt)
         if isinstance(_data_check, dict) and "_error" in _data_check:
             print(f"  ⚠ Sofascore lineup: HTTP {_data_check['_error']}")
             return {}, {}
         _data = _data_check
-        if not isinstance(_data, dict):
-            _data = _json_ll.loads(_txt)
-        _data = _json_ll.loads(_txt)
         
         def _build_map(side_data):
             # Returneaza {"names": {nume_norm: pid}, "nums": {numar: pid},
@@ -1183,16 +826,16 @@ async def _fetch_sofascore_lineup(page, event_id: str) -> tuple:
         return {}, {}
 
 
-async def fetch_from_roster(name: str, roster: list, page,
+async def fetch_player_photo(name: str, page,
                              client: httpx.AsyncClient, is_sub: bool = False,
-                             overrides: dict = None, match_type: str = "club",
-                             flashscore_url: str = "", team_id: int = 0,
-                             team_name: str = "", img_src: str = "",
-                             ss_ctx=None, ss_lineup_map: dict = None,
+                             flashscore_url: str = "", team_name: str = "",
+                             img_src: str = "", ss_ctx=None,
+                             ss_lineup_map: dict = None,
                              ss_player_number: str = ""):
     """
-    Descarca poza jucatorului (sursa primara + fallback).
-    Returneaza (photo_bytes, kit_number, source_label, sofifa_url).
+    Descarca poza jucatorului EXCLUSIV din lineup-ul Sofascore dat prin
+    --sofascore-url. Potrivirea se face dupa numarul de tricou, apoi dupa nume.
+    Returneaza (photo_bytes, kit_number, source_label).
     """
     clean = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
     clean = re.sub(r'\.$', '', clean).strip()
@@ -1202,7 +845,7 @@ async def fetch_from_roster(name: str, roster: list, page,
     # ── 1. Photo service — sursa primara, acoperire universala ──────
     if ss_ctx:
         try:
-            import urllib.parse as _up_ss, io as _io_ss
+            import io as _io_ss
             from PIL import Image as _PILss
             from collections import deque as _dq_ss
 
@@ -1267,41 +910,11 @@ async def fetch_from_roster(name: str, roster: list, page,
                                 _ss_pid = _names_map[_k2]
                                 break
 
-            if not _ss_pid:
-                # ── 1b. Search API (cand nu exista lineup map) — via page.goto ──
-                _ss_team = re.sub(r'\s*\([A-Z][a-z]{1,3}\)\s*$', '', team_name or '').strip()
-                _ss_q    = _up_ss.quote_plus(clean_no_init or clean)
-
-                _ss_results = []
-                try:
-                    import json as _json_ss2
-                    _ss_sr = await page.goto(
-                        f"https://api.sofascore.com/api/v1/search/all?q={_ss_q}",
-                        wait_until="load", timeout=15000
-                    )
-                    if _ss_sr and _ss_sr.ok:
-                        _ss_results = _json_ss2.loads(await _ss_sr.text()).get("results", [])
-                except Exception:
-                    _ss_results = []
-
-                _ss_match = None
-                for _res in _ss_results:
-                    _e = _res.get("entity", {})
-                    if _e.get("team", {}).get("sport", {}).get("slug") != "football":
-                        continue
-                    _t = _e.get("team", {}).get("name", "")
-                    if _ss_team and (_ss_team.lower() in _t.lower() or _t.lower() in _ss_team.lower()):
-                        _ss_match = _e
-                        break
-                if not _ss_match:
-                    for _res in _ss_results:
-                        _e = _res.get("entity", {})
-                        if _e.get("team", {}).get("sport", {}).get("slug") == "football":
-                            _ss_match = _e
-                            break
-                if _ss_match:
-                    _ss_pid = _ss_match["id"]
-
+            # NB: nu exista fallback pe cautare dupa nume. Cautarea returna
+            # primul fotbalist cu numele respectiv din toata baza Sofascore
+            # (ex: "Cunha" -> Matheus Cunha / Man Utd in loc de Jair / Forest),
+            # deci punea poze gresite fara sa avertizeze. Daca jucatorul nu e
+            # in lineup-ul din URL-ul Sofascore, se genereaza placeholder.
             if _ss_pid is not None:
                 _img_url = f"https://img.sofascore.com/api/v1/player/{_ss_pid}/image"
                 _body = b""
@@ -1350,7 +963,7 @@ async def fetch_from_roster(name: str, roster: list, page,
                         print(f"[photo ✓ {_dbg_w}x{_dbg_h}]", end=" ", flush=True)
                     except Exception:
                         print(f"[photo ✓]", end=" ", flush=True)
-                    return _body, "", "photo", ""
+                    return _body, "", "photo"
                 else:
                     print(f"[no image]", end=" ", flush=True)
             else:
@@ -1358,8 +971,11 @@ async def fetch_from_roster(name: str, roster: list, page,
         except Exception as _ss_exc:
             print(f"[exc: {_ss_exc}]", end=" ", flush=True)
 
-    # ── 2. Flashscore photo — fallback final (img_src din scraping) ──
-    if img_src and img_src.startswith("http"):
+    # ── 2. Flashscore photo — fallback final, DEZACTIVAT implicit ──
+    # Sursa ceruta e exclusiv Sofascore. Pune True daca vrei ca jucatorii
+    # lipsa din lineup-ul Sofascore sa ia totusi poza de pe Flashscore
+    # in loc de placeholder.
+    if ALLOW_FLASHSCORE_PHOTO_FALLBACK and img_src and img_src.startswith("http"):
         try:
             import urllib.request as _urlreq_fs, asyncio as _aio_fs
             _FS_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -1375,16 +991,16 @@ async def fetch_from_roster(name: str, roster: list, page,
             _fs_bytes = await _aio_fs.to_thread(_fs_dl)
             if _fs_bytes and len(_fs_bytes) > 1000:
                 print(f"[flashscore photo]", end=" ", flush=True)
-                return _fs_bytes, "", "flashscore", ""
+                return _fs_bytes, "", "flashscore"
         except Exception as _fs_exc:
             print(f"[flashscore exc: {_fs_exc}]", end=" ", flush=True)
 
-    return None, "", None, ""
+    return None, "", None
 
 def generate_placeholder(name: str, dest: Path) -> bool:
     """
     Genereaza o poza placeholder 240x240 cu numele jucatorului.
-    Folosita cand poza reala nu se gaseste pe SoFIFA.
+    Folosita cand jucatorul nu e gasit in lineup-ul Sofascore.
     """
     if not _PIL:
         return False
@@ -1500,10 +1116,6 @@ async def download_all_images(data: dict, images_only: bool = False,
     else:
         print(f"\n[2/3] Downloading photos...")
 
-    # Incarca overrides manuale (sofifa_overrides.json)
-    overrides = _load_overrides()
-    if overrides:
-        print(f"  Active overrides: {list(overrides.keys())}")
 
     home_team = data.get("match", {}).get("home_team", "")
     away_team = data.get("match", {}).get("away_team", "")
@@ -1557,7 +1169,7 @@ async def download_all_images(data: dict, images_only: bool = False,
 
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
 
-            hdrs = {"User-Agent": UA, "Referer": "https://sofifa.com/"}
+            hdrs = {"User-Agent": UA, "Referer": "https://www.flashscore.com/"}
 
             # ── 0. Photo service: initializare context ──
             ss_ctx = ctx
@@ -1593,20 +1205,20 @@ async def download_all_images(data: dict, images_only: bool = False,
                 except Exception:
                     print(f"  ⚠ Logo {filename}: not found")
 
-            # Roster gol — kit numbers vin din Flashscore (scraped direct)
+            # Kit numbers vin din Flashscore (scraped direct)
             groups = [
-                (data["home"]["players"],     "home_player", [], 0, home_team, home_lineup_map),
-                (data["away"]["players"],     "away_player", [], 0, away_team, away_lineup_map),
-                (data["home"]["substitutes"], "home_sub",    [], 0, home_team, home_lineup_map),
-                (data["away"]["substitutes"], "away_sub",    [], 0, away_team, away_lineup_map),
+                (data["home"]["players"],     "home_player", home_team, home_lineup_map),
+                (data["away"]["players"],     "away_player", away_team, away_lineup_map),
+                (data["home"]["substitutes"], "home_sub",    home_team, home_lineup_map),
+                (data["away"]["substitutes"], "away_sub",    away_team, away_lineup_map),
             ]
 
             # ── 3. Per jucator: descarca foto (paralel, max 3 simultan) ────
-            # 3a. Pre-procesare sincrona: kit din roster + skip cached
+            # 3a. Pre-procesare sincrona: skip cached
             _dl_sem   = asyncio.Semaphore(3)
             _dl_tasks = []
 
-            for players, prefix, roster, _tid, _tname, _lineup_map in groups:
+            for players, prefix, _tname, _lineup_map in groups:
                 is_sub = prefix.endswith("_sub")
                 for i, p in enumerate(players, 1):
                     name = p.get("name", "").strip()
@@ -1620,37 +1232,15 @@ async def download_all_images(data: dict, images_only: bool = False,
                     file_key = f"{prefix}_{i}"
                     is_placeholder = file_key in placeholders
 
-                    clean_name_for_check = re.sub(r'^\d+[\n\r\s]+', '', name).strip()
-                    clean_name_for_check = re.sub(r'\.$', '', clean_name_for_check).strip()
-                    clean_no_init_check  = re.sub(r'\s+[A-Z]\.?$', '', clean_name_for_check).strip()
-                    has_override = overrides and any(
-                        _norm(fs) in (_norm(clean_name_for_check), _norm(clean_no_init_check))
-                        for fs in overrides
-                    )
-
                     if player_only and dest.exists():
                         dest.unlink(missing_ok=True)
                         is_placeholder = False
-
-                    if not p.get("number"):
-                        _c  = clean_name_for_check
-                        _ni = clean_no_init_check
-                        _bk, _bs = '', 0.0
-                        for _rp in roster:
-                            _sc = max(
-                                _name_match(_c,  _rp['name']),
-                                _name_match(_ni, _rp['name']) if _ni != _c else 0
-                            )
-                            if _sc > _bs:
-                                _bs, _bk = _sc, _rp.get('kit', '')
-                        if _bk and _bs >= 0.3:
-                            p["number"] = _bk
 
                     # Cand e dat URL Sofascore, fortam re-download (sterge poza veche)
                     if sofascore_url and dest.exists():
                         dest.unlink(missing_ok=True)
                         is_placeholder = False
-                    if dest.exists() and not is_placeholder and not (images_only and has_override):
+                    if dest.exists() and not is_placeholder:
                         print(f"  ✓ {name} (cached)")
                         ok += 1
                         continue
@@ -1659,7 +1249,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                     print(f"  → {name}{lbl}", flush=True)
                     _dl_tasks.append({
                         "name": name, "p": p, "is_sub": is_sub,
-                        "roster": roster, "_tid": _tid, "_tname": _tname,
+                        "_tname": _tname,
                         "dest": dest, "file_key": file_key,
                         "ss_lineup_map": _lineup_map,
                     })
@@ -1669,12 +1259,11 @@ async def download_all_images(data: dict, images_only: bool = False,
                 async with _dl_sem:
                     _pg = await ctx.new_page()
                     try:
-                        return await fetch_from_roster(
-                            _t["name"], _t["roster"], _pg, client,
-                            is_sub=_t["is_sub"], overrides=overrides,
-                            match_type=MATCH_TYPE,
+                        return await fetch_player_photo(
+                            _t["name"], _pg, client,
+                            is_sub=_t["is_sub"],
                             flashscore_url=_t["p"].get("flashscore_url", ""),
-                            team_id=_t["_tid"], team_name=_t["_tname"],
+                            team_name=_t["_tname"],
                             img_src=_t["p"].get("img_src", ""),
                             ss_ctx=ss_ctx,
                             ss_lineup_map=_t.get("ss_lineup_map"),
@@ -1683,7 +1272,7 @@ async def download_all_images(data: dict, images_only: bool = False,
                     except BaseException as _e:
                         print(f"\n      ⚠ Crash '{_t['name']}': {type(_e).__name__}: {_e}")
                         traceback.print_exc()
-                        return None, None, None, ""
+                        return None, None, None
                     finally:
                         try:
                             await _pg.close()
@@ -1693,7 +1282,7 @@ async def download_all_images(data: dict, images_only: bool = False,
             _results = await asyncio.gather(*[_fetch_one(_t) for _t in _dl_tasks])
 
             # 3c. Proceseaza rezultatele in ordinea initiala
-            for _t, (raw, kit, src, sofifa_url) in zip(_dl_tasks, _results):
+            for _t, (raw, kit, src) in zip(_dl_tasks, _results):
                 p        = _t["p"]
                 dest     = _t["dest"]
                 file_key = _t["file_key"]
@@ -1703,15 +1292,11 @@ async def download_all_images(data: dict, images_only: bool = False,
                 if kit:
                     if is_sub or not p.get("number") or MATCH_TYPE == "national":
                         p["number"] = kit
-                if sofifa_url:
-                    p["sofifa_url"] = sofifa_url
-
                 num_label = f" #{p.get('number','')}" if p.get('number') else ""
                 if raw and save_image(raw, dest):
                     print(f"  ✓ {name}: OK ({src}{num_label})")
                     ok += 1
-                    _src_key = src if src in ("photo", "flashscore") else "sofifa"
-                    sources[_src_key] = sources.get(_src_key, 0) + 1
+                    sources[src] = sources.get(src, 0) + 1
                     placeholders.pop(file_key, None)
                 else:
                     safe_name = re.sub(r'[^\w\s\-]', '', name).strip()
@@ -1833,7 +1418,7 @@ def main():
         print("=" * 55)
         print("\nUsage:")
         print('  python run.py "https://www.flashscore.com/match/..."')
-        print('  python run.py --images-only   # re-download images with overrides')
+        print('  python run.py --images-only   # re-download images')
         sys.exit(1)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

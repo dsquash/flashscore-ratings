@@ -12,14 +12,12 @@ import subprocess
 import threading
 import re
 import sys
-import json
 from pathlib import Path
 
 BASE_DIR  = Path(__file__).parent
 LAST_URL  = BASE_DIR / "flashscore_output" / "last_url.txt"
 LAST_SS_URL = BASE_DIR / "flashscore_output" / "last_ss_url.txt"
 RUN_PY    = BASE_DIR / "run.py"
-OVERRIDES = BASE_DIR / "sofifa_overrides.json"
 
 IS_MAC = (sys.platform == "darwin")
 IS_WIN = sys.platform.startswith("win")
@@ -98,19 +96,8 @@ def _norm(s: str) -> str:
     return s.lower().strip()
 
 
-def _load_overrides() -> dict:
-    if not OVERRIDES.exists():
-        return {}
-    try:
-        with open(OVERRIDES, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
 
 
-def _save_overrides(data: dict):
-    with open(OVERRIDES, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 # ── App ───────────────────────────────────────────────────────────
@@ -618,8 +605,6 @@ class App(_BASE_CLS):
         else:
             self.missing_frame.pack_forget()
 
-    def _open_overrides_for_missing(self):
-        self._open_overrides(prefill=self._missing_players)
 
     # ── Stop ──────────────────────────────────────────────────────
 
@@ -721,7 +706,7 @@ class App(_BASE_CLS):
         if tpl_avail:  _what.append("After Effects template")
         ok = mb.askyesno("Update",
                          "Download and install:\n  • " + "\n  • ".join(_what) +
-                         "\n\nMatch data and overrides are safe."
+                         "\n\nMatch data is safe."
                          + ("\n\nThe AE template will be replaced directly." if tpl_avail else "")
                          + "\n\nRestart required after update.", icon="question")
         if not ok:
@@ -795,344 +780,7 @@ class App(_BASE_CLS):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    # ── Overrides window ──────────────────────────────────────────
 
-    def _open_overrides(self, prefill: list = None):
-        win = tk.Toplevel(self)
-        win.title("SoFIFA Overrides")
-        win.geometry("760x520")
-        win.resizable(True, True)
-        win.grab_set()
-
-        outer = ttk.Frame(win, padding=PAD)
-        outer.pack(fill="both", expand=True)
-
-        ttk.Label(outer, text="Manual mappings: Flashscore name  →  SoFIFA URL",
-                  font=(UI, 13, "bold")).pack(anchor="w", pady=(0, 2))
-        ttk.Label(outer,
-                  text="Example:  'Inacio'  →  https://sofifa.com/player/262622/...",
-                  font=(UI, 10), foreground="#6e6e73").pack(anchor="w", pady=(0, PAD_S))
-
-        prefill = [p for p in (prefill or []) if p]
-        pending_entries = []
-
-        if prefill:
-            overrides_now = _load_overrides()
-            to_fill = [p for p in prefill if p not in overrides_now]
-            if to_fill:
-                pf_frame = ttk.LabelFrame(outer, text=f"⚠  {len(to_fill)} player(s) not found",
-                                          padding=PAD_S)
-                pf_frame.pack(fill="x", pady=(0, PAD_S))
-                for pname in to_fill:
-                    row = ttk.Frame(pf_frame)
-                    row.pack(fill="x", pady=3)
-                    ttk.Label(row, text=pname, width=22, font=(UI, 11)).pack(side="left", padx=(0, 8))
-                    url_var = tk.StringVar()
-                    e = ttk.Entry(row, textvariable=url_var, font=(UI, 11))
-                    e.pack(side="left", fill="x", expand=True, ipady=2)
-                    def make_paste(entry=e):
-                        try: entry.delete(0, "end"); entry.insert(0, win.clipboard_get().strip())
-                        except Exception: pass
-                    ttk.Button(row, text="Paste", command=make_paste,
-                               **self._btn_kw("light")).pack(side="left", padx=(6, 0))
-                    pending_entries.append((pname, url_var))
-
-                def save_pending():
-                    ov = _load_overrides()
-                    saved = []
-                    for pname, uv in pending_entries:
-                        u = uv.get().strip()
-                        if u:
-                            ov[pname] = u; saved.append(pname)
-                    if saved:
-                        _save_overrides(ov); refresh_tree()
-                        self._log(f"  Overrides saved: {', '.join(saved)}\n")
-                        remaining = [p for p in self._missing_players if p not in saved]
-                        self._update_missing_banner(remaining)
-
-                ttk.Button(pf_frame, text="💾  Save all", command=save_pending,
-                           **self._btn_kw("primary")).pack(anchor="e", pady=(8, 0))
-
-        # ── Existing list ──────────────────────────────────────────
-        list_frame = ttk.Frame(outer)
-        list_frame.pack(fill="both", expand=True, pady=(0, PAD_S))
-
-        cols = ("fs_name", "sofifa_url")
-        tree = ttk.Treeview(list_frame, columns=cols, show="headings", height=10)
-        tree.heading("fs_name",    text="Flashscore Name")
-        tree.heading("sofifa_url", text="SoFIFA URL")
-        tree.column("fs_name",    width=160, anchor="w")
-        tree.column("sofifa_url", width=500, anchor="w")
-        sb = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        tree.pack(side="left", fill="both", expand=True)
-
-        def refresh_tree():
-            ov = _load_overrides()
-            tree.delete(*tree.get_children())
-            for k, v in ov.items():
-                tree.insert("", "end", values=(k, v))
-        refresh_tree()
-
-        # ── Add form ───────────────────────────────────────────────
-        add_frame = ttk.Frame(outer)
-        add_frame.pack(fill="x", pady=(0, PAD_S))
-
-        ttk.Label(add_frame, text="Name:", font=(UI, 11)).grid(row=0, column=0, sticky="w", padx=(0, 6))
-        entry_name_var = tk.StringVar()
-        ttk.Entry(add_frame, textvariable=entry_name_var, width=18, font=(UI, 11)
-                  ).grid(row=0, column=1, sticky="ew", padx=(0, 10))
-        ttk.Label(add_frame, text="SoFIFA URL:", font=(UI, 11)).grid(row=0, column=2, sticky="w", padx=(0, 6))
-        entry_url_var = tk.StringVar()
-        ttk.Entry(add_frame, textvariable=entry_url_var, width=34, font=(UI, 11)
-                  ).grid(row=0, column=3, sticky="ew", padx=(0, 10))
-        add_frame.columnconfigure(3, weight=1)
-
-        def do_add():
-            n = entry_name_var.get().strip(); u = entry_url_var.get().strip()
-            if not n or not u: return
-            ov = _load_overrides(); ov[n] = u; _save_overrides(ov)
-            refresh_tree(); entry_name_var.set(""); entry_url_var.set("")
-            self._log(f"  Override added: '{n}' → {u}\n")
-
-        def do_paste_url():
-            try: entry_url_var.set(win.clipboard_get().strip())
-            except Exception: pass
-
-        ttk.Button(add_frame, text="+ Add", command=do_add,
-                   **self._btn_kw("primary")).grid(row=0, column=4, padx=(0, 4))
-        ttk.Button(add_frame, text="Paste", command=do_paste_url,
-                   **self._btn_kw("light")).grid(row=0, column=5)
-
-        # ── Bottom ─────────────────────────────────────────────────
-        bot = ttk.Frame(outer)
-        bot.pack(fill="x")
-
-        def do_delete():
-            for item in tree.selection():
-                fs_name = tree.item(item, "values")[0]
-                ov = _load_overrides(); ov.pop(fs_name, None); _save_overrides(ov)
-            refresh_tree()
-
-        ttk.Button(bot, text="🗑 Delete selected", command=do_delete,
-                   **self._btn_kw("danger-outline" if _BOOT else "danger")).pack(side="left")
-        ttk.Button(bot, text="Close", command=win.destroy,
-                   **self._btn_kw("secondary")).pack(side="right")
-
-    # ── Player Photos window ──────────────────────────────────────
-
-    def _open_player_photos(self):
-        data_path = BASE_DIR / "flashscore_output" / "data.json"
-        if not data_path.exists():
-            import tkinter.messagebox as mb
-            mb.showinfo("Player Photos", "No match data found.\nRun Full Run first.")
-            return
-        try:
-            with open(data_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            import tkinter.messagebox as mb
-            mb.showerror("Player Photos", f"Could not read data.json:\n{e}")
-            return
-
-        win = tk.Toplevel(self)
-        win.title("Player SoFIFA URLs")
-        win.resizable(False, False)
-        win.grab_set()
-        # Fixed geometry based on column widths: 90+150+38+450+80 = 808 + scrollbar + padding
-        sw = win.winfo_screenwidth(); sh = win.winfo_screenheight()
-        w = min(960, int(sw * 0.90)); h = min(780, int(sh * 0.86))
-        x = (sw - w) // 2; y = max(30, (sh - h) // 4)
-        win.geometry(f"{w}x{h}+{x}+{y}")
-
-        outer = ttk.Frame(win, padding=PAD)
-        outer.pack(fill="both", expand=True)
-
-        # Header
-        match_info = data.get("match", {})
-        title_text = (f"{match_info.get('home_team','')}  "
-                      f"{match_info.get('home_score','')} - "
-                      f"{match_info.get('away_score','')}  "
-                      f"{match_info.get('away_team','')}")
-        ttk.Label(outer, text=title_text, font=(UI, 14, "bold")).pack(anchor="w", pady=(0, 4))
-        ttk.Label(outer, text="Click a player → paste URL / edit Kit # → click outside to auto-save",
-                  font=(UI, 10), foreground="#6e6e73").pack(anchor="w", pady=(0, PAD_S))
-
-        # Treeview
-        tree_frame = ttk.Frame(outer)
-        tree_frame.pack(fill="both", expand=True, pady=(0, PAD_S))
-
-        cols = ("group", "name", "kit", "sofifa_url", "override")
-        tree = ttk.Treeview(tree_frame, columns=cols, show="headings", height=14)
-        tree.heading("group",      text="Group")
-        tree.heading("name",       text="Player")
-        tree.heading("kit",        text="Kit")
-        tree.heading("sofifa_url", text="SoFIFA URL (detected / override)")
-        tree.heading("override",   text="Override?")
-        tree.column("group",      width=90,  anchor="w", stretch=False)
-        tree.column("name",       width=150, anchor="w", stretch=False)
-        tree.column("kit",        width=38,  anchor="center", stretch=False)
-        tree.column("sofifa_url", width=450, anchor="w")
-        tree.column("override",   width=80,  anchor="center", stretch=False)
-
-        sb = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        tree.pack(side="left", fill="both", expand=True)
-
-        def populate_tree():
-            tree.delete(*tree.get_children())
-            ov_fresh = _load_overrides()
-            groups_def = [
-                ("Home starter", data.get("home", {}).get("players",     [])),
-                ("Home sub",     data.get("home", {}).get("substitutes", [])),
-                ("Away starter", data.get("away", {}).get("players",     [])),
-                ("Away sub",     data.get("away", {}).get("substitutes", [])),
-            ]
-            for group_label, players in groups_def:
-                if not isinstance(players, list):
-                    continue
-                for p in players:
-                    if not isinstance(p, dict):
-                        continue
-                    pname = p.get("name", "")
-                    kit   = p.get("number", "")
-                    surl  = p.get("sofifa_url", "")
-                    pnorm = pname.lower().strip()
-                    pnorm2 = re.sub(r'\s+[a-z]\.?$', '', pnorm).strip()
-                    has_ov = any(fs.lower().strip() in (pnorm, pnorm2) for fs in ov_fresh)
-                    if has_ov:
-                        for fs, fu in ov_fresh.items():
-                            if fs.lower().strip() in (pnorm, pnorm2):
-                                surl = fu; break
-                    tree.insert("", "end", values=(
-                        group_label, pname, kit,
-                        surl or "— run Full Run v1.0.8+ to detect",
-                        "✓" if has_ov else ""
-                    ))
-
-        populate_tree()
-
-        # ── Editor ────────────────────────────────────────────────
-        edit_frame = ttk.LabelFrame(outer, text="Edit Player Data", padding=PAD_S)
-        edit_frame.pack(fill="x", pady=(0, PAD_S))
-
-        # Row 1: player name label
-        r1 = ttk.Frame(edit_frame)
-        r1.pack(fill="x", pady=(0, 6))
-        ttk.Label(r1, text="Player:", font=(UI, 11)).pack(side="left", padx=(0, 8))
-        sel_name_var = tk.StringVar(value="← click a player above")
-        ttk.Label(r1, textvariable=sel_name_var, font=(UI, 11, "bold"),
-                  foreground="#0a84ff").pack(side="left")
-
-        # Row 2: Kit number
-        r_kit = ttk.Frame(edit_frame)
-        r_kit.pack(fill="x", pady=(0, 6))
-        ttk.Label(r_kit, text="Kit #:", font=(UI, 11), width=10,
-                  anchor="w").pack(side="left", padx=(0, 8))
-        kit_var = tk.StringVar()
-        kit_entry = ttk.Entry(r_kit, textvariable=kit_var, font=(UI, 11), width=6)
-        kit_entry.pack(side="left", ipady=3, padx=(0, 8))
-
-        def do_save_kit():
-            name = sel_name_var.get().strip()
-            kit  = kit_var.get().strip()
-            if not name or name.startswith("←"): return
-            # Update in-memory data dict and data.json
-            all_grps = [
-                data.get("home", {}).get("players", []),
-                data.get("home", {}).get("substitutes", []),
-                data.get("away", {}).get("players", []),
-                data.get("away", {}).get("substitutes", []),
-            ]
-            found = False
-            for grp in all_grps:
-                for p in grp:
-                    if isinstance(p, dict) and _norm(p.get("name", "")) == _norm(name):
-                        p["number"] = kit
-                        found = True
-            if not found:
-                self._log(f"  ⚠ Player '{name}' not found in data.json\n")
-                return
-            dpath = BASE_DIR / "flashscore_output" / "data.json"
-            try:
-                with open(dpath, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                self._log(f"  ✓ Kit saved: '{name}' → #{kit}\n")
-                populate_tree()
-            except Exception as e:
-                self._log(f"  ⚠ Cannot save data.json: {e}\n")
-
-        kit_entry.bind("<FocusOut>", lambda e: do_save_kit())
-        kit_entry.bind("<Return>",   lambda e: do_save_kit())
-        ttk.Button(r_kit, text="Save Kit #", command=do_save_kit,
-                   **self._btn_kw("primary")).pack(side="left")
-
-        # Row 3: SoFIFA URL
-        r2 = ttk.Frame(edit_frame)
-        r2.pack(fill="x")
-        ttk.Label(r2, text="SoFIFA URL:", font=(UI, 11), width=10,
-                  anchor="w").pack(side="left", padx=(0, 8))
-        new_url_var = tk.StringVar()
-        url_entry = ttk.Entry(r2, textvariable=new_url_var, font=(UI, 11))
-        url_entry.pack(side="left", fill="x", expand=True, ipady=3, padx=(0, 8))
-
-        def on_tree_select(event=None):
-            sel = tree.selection()
-            if not sel: return
-            vals = tree.item(sel[0], "values")
-            if not vals: return
-            sel_name_var.set(vals[1])
-            # vals: (group, name, kit, sofifa_url, override?)
-            kit_var.set(vals[2] if vals[2] and vals[2] != "—" else "")
-            surl = vals[3]
-            new_url_var.set(surl if surl and not surl.startswith("—") else "")
-
-        tree.bind("<<TreeviewSelect>>", on_tree_select)
-        url_entry.bind("<FocusOut>", lambda e: do_save())
-        url_entry.bind("<Return>",   lambda e: do_save())
-
-        def do_paste():
-            try: new_url_var.set(win.clipboard_get().strip())
-            except Exception: pass
-
-        def do_save():
-            name = sel_name_var.get().strip()
-            url  = new_url_var.get().strip()
-            if not name or name.startswith("←"): return
-            if not url or not url.startswith("http"): return
-            ov = _load_overrides(); ov[name] = url; _save_overrides(ov)
-            self._log(f"  Override saved: '{name}' → {url}\n")
-            win.destroy()
-            self._run_player_download(name)
-
-        def do_remove():
-            name = sel_name_var.get().strip()
-            if not name or name.startswith("←"): return
-            ov = _load_overrides()
-            for k in list(ov.keys()):
-                if k.lower().strip() == name.lower().strip():
-                    del ov[k]
-            _save_overrides(ov); populate_tree()
-            self._log(f"  Override removed: '{name}'\n")
-
-        ttk.Button(r2, text="Paste", command=do_paste,
-                   **self._btn_kw("light")).pack(side="left", padx=(0, 4))
-        ttk.Button(r2, text="Save Override + Download", command=do_save,
-                   **self._btn_kw("success")).pack(side="left", padx=(0, 4))
-        ttk.Button(r2, text="Remove Override", command=do_remove,
-                   **self._btn_kw("danger-outline" if _BOOT else "danger")).pack(side="left")
-
-        # Bottom
-        bot = ttk.Frame(outer)
-        bot.pack(fill="x")
-        ttk.Button(bot, text="⬇  Redownload All Photos",
-                   command=lambda: [win.destroy(), self._run_redownload()],
-                   **self._btn_kw("secondary")).pack(side="left")
-        ttk.Button(bot, text="Close", command=win.destroy,
-                   **self._btn_kw("secondary-outline" if _BOOT else "secondary")
-                   ).pack(side="right")
 
 
 
